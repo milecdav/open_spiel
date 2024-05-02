@@ -615,6 +615,7 @@ class RNaDConfig:
   """Configuration parameters for the RNaDSolver."""
   # The game parameter string including its name and parameters.
   game_name: str
+  game_params: Sequence = tuple()
   # The games longer than this value are truncated. Must be strictly positive.
   trajectory_max: int = 10
 
@@ -643,6 +644,7 @@ class RNaDConfig:
   eta_reward_transform: float = 0.2
   nerd: NerdConfig = NerdConfig()
   c_vtrace: float = 1.0
+  rho_vtrace: float = np.inf
 
   # Options related to fine tuning of the agent.
   finetune: FineTuning = FineTuning()
@@ -758,7 +760,14 @@ class RNaDSolver(policy_lib.Policy):
     # TODO(author16): serialize both above to get the fully deterministic behaviour.
 
     # Create a game and an example of a state.
-    self._game = pyspiel.load_game(self.config.game_name)
+    game_params = {}
+    for n, p in self.config.game_params:
+      game_params[n] = p
+      
+    self._game = pyspiel.load_game(self.config.game_name, game_params)
+    if self._game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
+        self._game = pyspiel.load_game_as_turn_based(self.config.game_name, game_params)
+
     self._ex_state = self._play_chance(self._game.new_initial_state())
 
     self.network = RNaDNetwork(self._game.num_distinct_actions(), self.config.policy_network_layers)
@@ -823,7 +832,7 @@ class RNaDSolver(policy_lib.Policy):
           player,
           lambda_=1.0,
           c=self.config.c_vtrace,
-          rho=np.inf,
+          rho=self.config.rho_vtrace,
           eta=self.config.eta_reward_transform)
       v_target_list.append(v_target_)
       has_played_list.append(has_played)
