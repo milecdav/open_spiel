@@ -806,6 +806,18 @@ void State::InformationStateTensor(Player player,
   InformationStateTensor(player, absl::MakeSpan(*values));
 }
 
+std::vector<float> State::StateTensor() const {
+  std::vector<float> state_tensor(game_->StateTensorSize());`
+  StateTensor(absl::MakeSpan(state_tensor));
+  return state_tensor;
+}
+
+void State::StateTensor(std::vector<float>* values) const {
+  // Retained for backwards compatibility.
+  values->resize(game_->StateTensorSize());
+  StateTensor(absl::MakeSpan(*values));
+}
+
 bool State::PlayerAction::operator==(const PlayerAction& other) const {
   return player == other.player && action == other.action;
 }

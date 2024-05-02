@@ -315,6 +315,8 @@ PYBIND11_MODULE(pyspiel, m) {
                State::InformationStateTensor)
       .def("information_state_tensor", (std::vector<float>(State::*)() const) &
                                            State::InformationStateTensor)
+      .def("state_tensor", (std::vector<float>(State::*)() const) &
+                                           State::StateTensor)
       .def("observation_string",
            (std::string(State::*)(int) const) & State::ObservationString)
       .def("observation_string",

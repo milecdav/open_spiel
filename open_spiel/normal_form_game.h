@@ -103,6 +103,18 @@ class NFGState : public SimMoveState {
       values[0] = 0;
     }
   }
+
+  // TODO: Maybe do this differently
+  void StateTensor(absl::Span<float> values) const override { 
+    SPIEL_CHECK_EQ(values.size(), 1);
+    if (IsTerminal()) {
+      values[0] = 1;
+    } else {
+      values[0] = 0;
+    }
+  }
+
+
 };
 
 class NormalFormGame : public SimMoveGame {
@@ -112,6 +124,8 @@ class NormalFormGame : public SimMoveGame {
     return {1};
   }
   std::vector<int> ObservationTensorShape() const override { return {1}; }
+  // TODO: Do this differently
+  std::vector<int> StateTensorShape() const override { return {1}; }
 
   // Game lasts one turn.
   int MaxGameLength() const override { return 1; }

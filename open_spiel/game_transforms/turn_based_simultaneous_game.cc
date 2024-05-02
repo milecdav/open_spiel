@@ -204,6 +204,26 @@ void TurnBasedSimultaneousState::InformationStateTensor(
                                  absl::MakeSpan(value_it, values.end()));
 }
 
+void TurnBasedSimultaneousState::StateTensor(absl::Span<float> values) const {
+  SPIEL_CHECK_EQ(values.size(), game_->StateTensorSize());
+  auto value_it = values.begin();
+
+  // First, get the 2 * num_players bits to encode whose turn it is and who
+  // the observer is.
+
+
+  int num_players = GetGame()->NumPlayers();
+  int num_actions = GetGame()->NumDistinctActions();
+  // We do not care about the last player action, since after it's action the game transitions to a new state
+  for (int pl = 0; pl < num_players_ - 1; ++pl) {
+    for (int a = 0; a < GetGame()->NumDistinctActions(); ++a) {
+      *value_it++ = (pl < CurrentPlayer() && action_vector_[pl] == a ? 1 : 0);
+    }
+  }
+  // Then get the underlying observation
+  state_->StateTensor(absl::MakeSpan(value_it, values.end()));
+}
+
 std::string TurnBasedSimultaneousState::ObservationString(Player player) const {
   SPIEL_CHECK_GE(player, 0);
   SPIEL_CHECK_LT(player, num_players_);

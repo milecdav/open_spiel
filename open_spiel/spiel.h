@@ -513,6 +513,14 @@ class State {
   virtual void InformationStateTensor(Player player,
                                       std::vector<float>* values) const;
 
+  // Compact representation of state, that could be used for neural networks.
+  // Has to be separately implemented for each game.
+  virtual void StateTensor(absl::Span<float> values) const {
+    SpielFatalError("StateTensor unimplemented!");
+  }
+  std::vector<float> StateTensor() const;
+  virtual void StateTensor(std::vector<float>* values) const;
+
   // We have functions for observations which are parallel to those for
   // information states. An observation should have the following properties:
   //  - It has at most the same information content as the information state
@@ -828,6 +836,17 @@ class Game : public std::enable_shared_from_this<Game> {
   // format.
   int InformationStateTensorSize() const {
     std::vector<int> shape = InformationStateTensorShape();
+    return shape.empty() ? 0
+                         : absl::c_accumulate(shape, 1, std::multiplies<int>());
+  }
+
+
+  virtual std::vector<int> StateTensorShape() const {
+    SpielFatalError("StateTensorShape unimplemented.");
+  }
+
+  int StateTensorSize() const {
+    std::vector<int> shape = StateTensorShape();
     return shape.empty() ? 0
                          : absl::c_accumulate(shape, 1, std::multiplies<int>());
   }
