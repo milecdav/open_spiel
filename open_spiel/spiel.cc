@@ -807,7 +807,7 @@ void State::InformationStateTensor(Player player,
 }
 
 std::vector<float> State::StateTensor() const {
-  std::vector<float> state_tensor(game_->StateTensorSize());`
+  std::vector<float> state_tensor(game_->StateTensorSize());
   StateTensor(absl::MakeSpan(state_tensor));
   return state_tensor;
 }
