@@ -1353,6 +1353,31 @@ class RNaDSolver(policy_lib.Policy):
         for action, valid in enumerate(jax.device_get(env_step.legal[0]))
         if valid
     }
+  
+
+  def get_multi_valued_states(self, state: pyspiel.State, player:int = -1):
+    env_step = self._batch_of_states_as_env_step([state])
+    multi_valued_states = self._jit_get_multi_valued_states(self.mvs_params_target, env_step)[0]
+    # print("MVS: ")
+    # print(state.history_str())
+    if self.config.matrix_valued_states:
+      if player == 0:
+        multi_valued_states = multi_valued_states[:self.config.num_transformations + 1]
+      elif player == 1:
+        multi_valued_states = multi_valued_states[::self.config.num_transformations + 1]
+    else:
+      if player == 0:
+        multi_valued_states = multi_valued_states[:self.config.num_transformations + 1]
+      elif player == 1:
+        multi_valued_states = multi_valued_states[jnp.r_[0, self.config.num_transformations + 1:2 * self.config.num_transformations + 1]]
+    # print(multi_valued_states)
+    return np.asarray(multi_valued_states)
+  
+  # def get_next_state(self, )
+
+  @functools.partial(jax.jit, static_argnums=(0,))
+  def _jit_get_multi_valued_states(self, params: Params, env_step: EnvStep) -> chex.Array:
+    return self.mvs_network.apply(params, env_step)
 
   @functools.partial(jax.jit, static_argnums=(0,))
   def _network_jit_apply_and_post_process(

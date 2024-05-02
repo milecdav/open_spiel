@@ -1,4 +1,8 @@
 import pyspiel
+import chex
+import jax
+import jax.numpy as jnp
+
 
 from open_spiel.python.algorithms.sepot.rnad_sepot import RNaDConfig, RNaDSolver
 from open_spiel.python.algorithms.sepot.cfr_sepot import SePoTCFR
@@ -23,10 +27,14 @@ class SePoTConfig:
 
 class SePoT_RNaD:
   def __init__(self, sepot_config: SePoTConfig) -> None:
-    self.rnad = RNaDSolver(sepot_config.rnad_config, True)
+    self.rnad = RNaDSolver(sepot_config.rnad_config)
     self.config = sepot_config
 
 
+    self.policy = {}
+
+    
+  def reset_policy(self):
     self.policy = {}
     
   def train(self, num_iterations: int):

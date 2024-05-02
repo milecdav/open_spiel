@@ -29,6 +29,7 @@ class SePoTCFRConstants:
   players: int
   max_depth: int
   max_actions: int # This includes chance outcomes!  
+  resolving_player: int
   transformations: int
   reached_depth_limit: bool
   best_response: bool

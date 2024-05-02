@@ -20,6 +20,7 @@ from ortools.sat.python import cp_model
 
 def reconstruct_goofspiel(state: pyspiel.State, limit: int):
   # TOOD: What about turn-based goofspiel
+  assert state.is_chance_node() == False
   turn_outcomes = []
   player_bets = []
   num_cards = state.get_game().num_distinct_actions()
@@ -33,8 +34,8 @@ def reconstruct_goofspiel(state: pyspiel.State, limit: int):
       turn_outcomes.append(1 if h.action < prev_action else -1 if h.action > prev_action else 0)
   histories, construct_subgame = reconstruct_public_state_goofspiel(turn_outcomes, player_bets, num_cards, limit)
   # print(state.current_player())
-  if state.current_player() == 0 or state.is_chance_node():
-    return [], construct_subgame
+  if state.current_player() == 0:
+    return histories, construct_subgame
   new_histories = []
   for history in histories:
     for a in range(state.get_game().num_distinct_actions()):
