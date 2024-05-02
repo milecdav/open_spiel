@@ -535,7 +535,7 @@ def v_trace(
 
   return v_target, has_played, learning_output
 
-def multi_valued_states_v_trace(
+def mvs_v_trace(
     state_v: chex.Array,
     valid: chex.Array,
     acting_policy: chex.Array,
@@ -626,7 +626,7 @@ def get_loss_v(v_list: Sequence[chex.Array],
     loss_v_list.append(loss_v)
   return sum(loss_v_list)
 
-def get_loss_multi_valued_states(state_v_list: chex.Array,
+def get_loss_mvs(state_v_list: chex.Array,
                      state_v_target_list: chex.Array,
                      mask_list: chex.Array) -> chex.Array:
   chex.assert_trees_all_equal_shapes(state_v_list, state_v_target_list)
@@ -739,8 +739,8 @@ class RNaDConfig:
 
   # Network configuration.
   policy_network_layers: Sequence[int] = (256, 256)
-  multi_valued_states_network_layers: Sequence[int] = (256, 256)
-  transformations_network_layers: Sequence[int] = (256, 256)
+  mvs_network_layers: Sequence[int] = (256, 256)
+  transformation_network_layers: Sequence[int] = (256, 256)
 
   # The batch size to use when learning/improving parameters.
   batch_size: int = 256
@@ -867,7 +867,8 @@ class MultiValuedStatesNetwork(nn.Module):
     return v
 
 class TransformationsNetwork(nn.Module):
-  out_dims: int
+  actions: int
+  transformations: int
   network_layers: Sequence[int]
 
   @nn.compact
@@ -876,8 +877,8 @@ class TransformationsNetwork(nn.Module):
     for size in self.network_layers:
       x = nn.Dense(size)(x)              # create inline Flax Module submodules
       x = nn.relu(x)
-    pi_deviation = nn.Dense(self.out_dims)(x)
-    pi_deviation = pi_deviation.reshape((*pi_deviation.shape[:-1], self._game.num_distinct_actions(), self.config.num_transformations))
+    pi_deviation = nn.Dense(self.actions * self.transformations)(x)
+    pi_deviation = pi_deviation.reshape((*pi_deviation.shape[:-1], self.actions, self.transformations))
     return pi_deviation
 
 class RNaDSolver(policy_lib.Policy):
@@ -917,15 +918,18 @@ class RNaDSolver(policy_lib.Policy):
     self._ex_state = self._play_chance(self._game.new_initial_state())
 
     self.network = RNaDNetwork(self._game.num_distinct_actions(), self.config.policy_network_layers)
-    self.mvs_network = MultiValuedStatesNetwork(self.num_transformations(), self.config.multi_valued_states_network_layers)
+    self.mvs_network = MultiValuedStatesNetwork(self.num_transformations(), self.config.mvs_network_layers)
     #TODO: If necessary we can do this in multiple networks. For now the same network just with different parameters is used since it has same input and output
-    self.transformations_network = TransformationsNetwork(self._game.num_distinct_actions() * self.config.num_transformations, self.config.transformations_network_layers)
+    self.transformation_network = TransformationsNetwork(self._game.num_distinct_actions(), self.config.num_transformations, self.config.transformation_network_layers)
 
     # The machinery related to updating parameters/learner.
     self._entropy_schedule = EntropySchedule(
         sizes=self.config.entropy_schedule_size,
         repeats=self.config.entropy_schedule_repeats)
+    
     self._loss_and_grad = jax.value_and_grad(self.loss, has_aux=False)
+    self._mvs_loss_and_grad = jax.value_and_grad(self.mvs_loss, has_aux=False)
+    self._transformation_loss_and_grad = jax.value_and_grad(self.transformation_loss, has_aux=False)
 
     # Create initial parameters.
     env_step = self._state_as_env_step(self._ex_state)
@@ -940,7 +944,7 @@ class RNaDSolver(policy_lib.Policy):
     self.mvs_params_target = self.mvs_network.init(key, env_step)
 
     key = self._next_rng_key()
-    self.transformations_params = [self.transformations_network.init(key, env_step) for _ in self._game.num_players()]
+    self.transformation_params = [self.transformation_network.init(key, env_step) for _ in range(self._game.num_players())]
 
     # Parameter optimizers.
     self.optimizer = optax_optimizer(
@@ -967,7 +971,7 @@ class RNaDSolver(policy_lib.Policy):
     self.mvs_optimizer_target = optax_optimizer(
         self.mvs_params_target, optax.sgd(self.config.target_network_avg))
     
-    self.transformation_optimizers = [optax_optimizer(self.transformations_params[pl], optax.chain(
+    self.transformation_optimizers = [optax_optimizer(self.transformation_params[pl], optax.chain(
         optax.scale_by_adam(
             eps_root=0.0,
             **self.config.adam,
@@ -1032,7 +1036,7 @@ class RNaDSolver(policy_lib.Policy):
   def transformation_loss(self, transformation_params: Params, policy_before_train: chex.Array, policy_after_train: chex.Array, player: int, ts: TimeStep):
 
     update_player = ts.env.player_id == player
-    rollout = jax.vmap(self.transformations_network[player].apply, (None, 0), 0)
+    rollout = jax.vmap(self.transformation_network.apply, (None, 0), 0)
     transformation_direction = rollout(transformation_params, ts.env)  
     update_direction = (policy_after_train - policy_before_train)[..., jnp.newaxis]
     
@@ -1054,9 +1058,9 @@ class RNaDSolver(policy_lib.Policy):
     loss = jnp.sum(loss) / (normalization + (normalization == 0.0))
     return loss
   
-  def multi_valued_states_loss(self, multi_valued_states_params: Params, multi_valued_states_params_target: Params, policy_params: Params, transformation_params: Params, ts: TimeStep):
+  def mvs_loss(self, mvs_params: Params, mvs_params_target: Params, policy_params: Params, transformation_params: Params, ts: TimeStep):
     policy_rollout = jax.vmap(self.network.apply, (None, 0), 0)
-    transformation_rollout = jax.vmap(self.transformations_network.apply, (None, 0), 0)
+    transformation_rollout = jax.vmap(self.transformation_network.apply, (None, 0), 0)
     pi, _, _, _ = policy_rollout(policy_params, ts.env)
 
     policy_pprocessed = self.config.finetune(pi, ts.env.legal, 0)
@@ -1074,19 +1078,19 @@ class RNaDSolver(policy_lib.Policy):
       p1_transformation_direction = normalize_direction_with_mask(p1_transformation_direction, ts.env.legal)
       # Transforming only policy of a single player
       p1_transformation_direction = jnp.where(ts.env.player_id[..., jnp.newaxis, jnp.newaxis] == 0, p1_transformation_direction, 0)
-      multi_valued_states_p1_transformations = jnp.concatenate((jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis], p1_transformation_direction), axis=-1)
+      mvs_p1_transformations = jnp.concatenate((jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis], p1_transformation_direction), axis=-1)
 
       p2_transformation_direction = transformation_rollout(transformation_params[1], ts.env)
       p2_transformation_direction = normalize_direction_with_mask(p2_transformation_direction, ts.env.legal)
       # Transforming only policy of a single player
       p2_transformation_direction = jnp.where(ts.env.player_id[..., jnp.newaxis, jnp.newaxis] == 1, p2_transformation_direction, 0)
-      multi_valued_states_p2_transformations = jnp.concatenate((jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis], p2_transformation_direction), axis=-1)
+      mvs_p2_transformations = jnp.concatenate((jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis], p2_transformation_direction), axis=-1)
 
       
 
-      multi_valued_states_p1_transformations = jnp.repeat(multi_valued_states_p1_transformations, self.config.num_transformations + 1, axis=-1)
-      multi_valued_states_p2_transformations = jnp.tile(multi_valued_states_p2_transformations, self.config.num_transformations + 1)
-      multi_valued_states_transformations = multi_valued_states_p1_transformations + multi_valued_states_p2_transformations
+      mvs_p1_transformations = jnp.repeat(mvs_p1_transformations, self.config.num_transformations + 1, axis=-1)
+      mvs_p2_transformations = jnp.tile(mvs_p2_transformations, self.config.num_transformations + 1)
+      mvs_transformations = mvs_p1_transformations + mvs_p2_transformations
 
 
     # Multi Valued states
@@ -1097,27 +1101,27 @@ class RNaDSolver(policy_lib.Policy):
         transformation_direction = normalize_direction_with_mask(transformation_direction, ts.env.legal)
         # Transforming only policy of a single player
         transformation_direction = jnp.where(ts.env.player_id[..., jnp.newaxis, jnp.newaxis] == pl, transformation_direction, 0)
-        multi_valued_states_transformations = jnp.concatenate((multi_valued_states_transformations, transformation_direction), axis=-1)
+        mvs_transformations = jnp.concatenate((mvs_transformations, transformation_direction), axis=-1)
 
-    multi_valued_states_rollout = jax.vmap(self.multi_valued_states_network.apply, (None, 0), 0)
+    mvs_rollout = jax.vmap(self.mvs_network.apply, (None, 0), 0)
   
-    multi_valued_states_v = multi_valued_states_rollout(multi_valued_states_params, ts.env)
-    multi_valued_states_v_target = multi_valued_states_rollout(multi_valued_states_params_target, ts.env)
+    mvs_v = mvs_rollout(mvs_params, ts.env)
+    mvs_v_target = mvs_rollout(mvs_params_target, ts.env)
 
     reward = ts.actor.rewards[:, :, 0]  # [T, B, Player]
-    multi_valued_states_v_target_ = multi_valued_states_v_trace(
-          multi_valued_states_v_target,
+    mvs_v_target_ = mvs_v_trace(
+          mvs_v_target,
           ts.env.valid,
           ts.actor.policy,
           policy_pprocessed,
-          multi_valued_states_transformations,
+          mvs_transformations,
           ts.actor.action_oh,
           reward,
           lambda_=1.0,
           c=self.config.c_vtrace,
           rho=self.config.rho_vtrace)
 
-    loss_v = get_loss_multi_valued_states(multi_valued_states_v, multi_valued_states_v_target_, ts.env.valid)
+    loss_v = get_loss_mvs(mvs_v, mvs_v_target_, ts.env.valid)
 
     return loss_v
 
@@ -1170,31 +1174,31 @@ class RNaDSolver(policy_lib.Policy):
 
     logs = {}
     for player in range(self._game.num_players()):
-      loss_val, grad = self._transformations_loss_and_grad(transformation_params[player], policy_before_train, policy_after_train, player, timestep)
+      loss_val, grad = self._transformation_loss_and_grad(transformation_params[player], policy_before_train, policy_after_train, player, timestep)
       transformation_params[player] = transformation_optimizers[player](transformation_params[player], grad)
       logs[f"Player {player} transformation loss"] = loss_val
     return (transformation_params, transformation_optimizers), logs
   
 
   @functools.partial(jax.jit, static_argnums=(0,))
-  def update_multi_valued_states_params(
+  def update_mvs_params(
     self, 
-    multi_valued_states_params: Params,
-    multi_valued_states_params_target: Params,
+    mvs_params: Params,
+    mvs_params_target: Params,
     policy_params: Params,
     transformation_params: Params,
-    multi_valued_states_optimizer: Optimizer,
-    multi_valued_states_optimizer_target: Optimizer,
+    mvs_optimizer: Optimizer,
+    mvs_optimizer_target: Optimizer,
     timestep: TimeStep):
     """A jitted pur-functional part for multi-valued states."""
-    loss_val, grad = self._multi_valued_states_loss_and_grad(multi_valued_states_params, multi_valued_states_params_target, policy_params, transformation_params, timestep)
+    loss_val, grad = self._mvs_loss_and_grad(mvs_params, mvs_params_target, policy_params, transformation_params, timestep)
 
-    multi_valued_states_params = multi_valued_states_optimizer(multi_valued_states_params, grad)
+    mvs_params = mvs_optimizer(mvs_params, grad)
 
-    multi_valued_states_params_target = multi_valued_states_optimizer_target(
-        multi_valued_states_params_target, tree.tree_map(lambda a, b: a - b, multi_valued_states_params_target, multi_valued_states_params))
+    mvs_params_target = mvs_optimizer_target(
+        mvs_params_target, tree.tree_map(lambda a, b: a - b, mvs_params_target, mvs_params))
     logs = {"multi valued states loss":  loss_val}
-    return (multi_valued_states_params, multi_valued_states_params_target, multi_valued_states_optimizer, multi_valued_states_optimizer_target), logs
+    return (mvs_params, mvs_params_target, mvs_optimizer, mvs_optimizer_target), logs
 
   def __getstate__(self):
     """To serialize the agent."""
@@ -1215,14 +1219,14 @@ class RNaDSolver(policy_lib.Policy):
         params_target=self.params_target,
         params_prev=self.params_prev,
         params_prev_=self.params_prev_,
-        multi_valued_states_params=self.multi_valued_states_params,
-        multi_valued_states_params_target=self.multi_valued_states_params_target,
+        mvs_params=self.mvs_params,
+        mvs_params_target=self.mvs_params_target,
         transformation_params=self.transformation_params,
         # Optimizer state.
         optimizer=self.optimizer.state,  # pytype: disable=attribute-error  # always-use-return-annotations
         optimizer_target=self.optimizer_target.state,  # pytype: disable=attribute-error  # always-use-return-annotations
-        multi_valued_states_optimizer=self.multi_valued_states_optimizer.state,
-        multi_valued_states_optimizer_target=self.multi_valued_states_optimizer_target.state,
+        mvs_optimizer=self.mvs_optimizer.state,
+        mvs_optimizer_target=self.mvs_optimizer_target.state,
         transformation_optimizers=[o.state for o in self.transformation_optimizers]
     )
 
@@ -1246,15 +1250,15 @@ class RNaDSolver(policy_lib.Policy):
     self.params_target = state["params_target"]
     self.params_prev = state["params_prev"]
     self.params_prev_ = state["params_prev_"]
-    self.multi_valued_states_params = state["multi_valued_states_params"]
-    self.multi_valued_states_params_target = state["multi_valued_states_params_target"]
+    self.mvs_params = state["mvs_params"]
+    self.mvs_params_target = state["mvs_params_target"]
     self.transformation_params = state["transformation_params"]
 
     # Optimizer state.
     self.optimizer.state = state["optimizer"]
     self.optimizer_target.state = state["optimizer_target"]
-    self.multi_valued_states_optimizer.state = state["multi_valued_states_optimizer"]
-    self.multi_valued_states_optimizer_target.state = state["multi_valued_states_optimizer_target"]
+    self.mvs_optimizer.state = state["mvs_optimizer"]
+    self.mvs_optimizer_target.state = state["mvs_optimizer_target"]
     for i, o in enumerate(state["transformation_optimizers"]):
       self.transformation_optimizers[i].state = o
 
@@ -1278,10 +1282,10 @@ class RNaDSolver(policy_lib.Policy):
         self.transformation_params, self.transformation_optimizers, policy_before_train, 
         policy_after_train, timestep)
 
-    (self.multi_valued_states_params, self.multi_valued_states_params_target, 
-    self.multi_valued_states_optimizer, self.multi_valued_states_optimizer_target), mvs_logs = self.update_multi_valued_states_params(self.multi_valued_states_params,
-        self.multi_valued_states_params_target, self.params, self.transformation_params, self.multi_valued_states_optimizer,
-        self.multi_valued_states_optimizer_target, timestep)
+    (self.mvs_params, self.mvs_params_target, 
+    self.mvs_optimizer, self.mvs_optimizer_target), mvs_logs = self.update_mvs_params(self.mvs_params,
+        self.mvs_params_target, self.params, self.transformation_params, self.mvs_optimizer,
+        self.mvs_optimizer_target, timestep)
     
     logs.update(t_logs)
     logs.update(mvs_logs)
