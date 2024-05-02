@@ -18,7 +18,8 @@ import functools
 from typing import Any, Callable, Sequence, Tuple
 
 import chex
-import haiku as hk
+import flax.linen as nn
+
 import jax
 from jax import lax
 from jax import numpy as jnp
@@ -205,14 +206,14 @@ class FineTuning:
     if len(policy.shape) == 1:
       return self._discretize_single(policy)
 
-    # policy may be [B, A] or [T, B, A], etc. Thus add hk.BatchApply.
+    # policy may be [B, A] or [T, B, A], etc. Thus add nn.BatchApply.
     dims = len(policy.shape) - 1
 
     # TODO(author18): avoid mixing vmap and BatchApply since the two could
     # be folded into either a single BatchApply or a sequence of vmaps, but
     # not the mix.
     vmapped = jax.vmap(self._discretize_single)
-    policy = hk.BatchApply(vmapped, num_dims=dims)(policy)
+    policy = nn.BatchApply(vmapped, num_dims=dims)(policy)
 
     return policy
 
@@ -712,6 +713,24 @@ def optax_optimizer(
 
   return OptaxOptimizer(state=init_fn(params))
 
+class RNaDNetwork(nn.Module):
+  """The RNaD network.""" 
+  out_dims: int
+  network_layers: Sequence[int]
+
+  @nn.compact
+  def __call__(self, env_step):
+    x = env_step.obs
+    for size in self.network_layers:
+      x = nn.Dense(size)(x)              # create inline Flax Module submodules
+      x = nn.relu(x)
+    logit = nn.Dense(self.out_dims)(x)       # shape inference
+    v = nn.Dense(1)(x)
+
+    pi = _legal_policy(logit, env_step.legal)
+    log_pi = legal_log_policy(logit, env_step.legal)
+    return pi, v, log_pi, logit
+
 
 class RNaDSolver(policy_lib.Policy):
   """Implements a solver for the R-NaD Algorithm.
@@ -742,26 +761,8 @@ class RNaDSolver(policy_lib.Policy):
     self._game = pyspiel.load_game(self.config.game_name)
     self._ex_state = self._play_chance(self._game.new_initial_state())
 
-    # The network.
-    def network(
-        env_step: EnvStep
-    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
-      mlp_torso = hk.nets.MLP(
-          self.config.policy_network_layers, activate_final=True
-      )
-      torso = mlp_torso(env_step.obs)
+    self.network = RNaDNetwork(self._game.num_distinct_actions(), self.config.policy_network_layers)
 
-      mlp_policy_head = hk.nets.MLP([self._game.num_distinct_actions()])
-      logit = mlp_policy_head(torso)
-
-      mlp_policy_value = hk.nets.MLP([1])
-      v = mlp_policy_value(torso)
-
-      pi = _legal_policy(logit, env_step.legal)
-      log_pi = legal_log_policy(logit, env_step.legal)
-      return pi, v, log_pi, logit
-
-    self.network = hk.without_apply_rng(hk.transform(network))
 
     # The machinery related to updating parameters/learner.
     self._entropy_schedule = EntropySchedule(
