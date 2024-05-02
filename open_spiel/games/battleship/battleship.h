@@ -191,6 +191,7 @@ class BattleshipGame final : public Game {
   int MaxGameLength() const override;
   std::string ActionToString(Player player, Action action_id) const override;
   std::vector<int> InformationStateTensorShape() const override;
+  std::vector<int> StateTensorShape() const override;
 
   // Action (de)serialization routines
   // =================================
@@ -257,6 +258,7 @@ class BattleshipState final : public State {
   std::string InformationStateString(Player player) const override;
   void InformationStateTensor(Player player,
                               absl::Span<float> values) const override;
+  void StateTensor(absl::Span<float> values) const override;
   std::string ObservationString(Player player) const override;
   void UndoAction(Player player, Action action_id) override;
 

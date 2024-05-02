@@ -103,6 +103,7 @@ class GoofspielState : public SimMoveState {
 
   void InformationStateTensor(Player player,
                               absl::Span<float> values) const override;
+  void StateTensor(absl::Span<float> values) const override;
   void ObservationTensor(Player player,
                          absl::Span<float> values) const override;
   std::unique_ptr<State> Clone() const override;
@@ -151,6 +152,7 @@ class GoofspielGame : public Game {
   double MaxUtility() const override;
   absl::optional<double> UtilitySum() const override;
   std::vector<int> InformationStateTensorShape() const override;
+  std::vector<int> StateTensorShape() const override;
   std::vector<int> ObservationTensorShape() const override;
   int MaxGameLength() const override { return num_cards_; }
   std::shared_ptr<Observer> MakeObserver(
@@ -170,6 +172,7 @@ class GoofspielGame : public Game {
   std::shared_ptr<Observer> info_state_observer_;
   std::shared_ptr<Observer> public_observer_;
   std::shared_ptr<Observer> private_observer_;
+  std::shared_ptr<Observer> state_observer_;
   // TODO: verify whether this bound is tight and/or tighten it.
   int MaxChanceNodesInHistory() const override { return MaxGameLength(); }
 

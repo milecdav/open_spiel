@@ -116,6 +116,37 @@ class GoofspielObserver : public Observer {
     const bool perf_rec = iig_obs_type_.perfect_recall;
     const bool priv_one =
         iig_obs_type_.private_info == PrivateInfoType::kSinglePlayer;
+    const bool priv_all =
+        iig_obs_type_.private_info == PrivateInfoType::kAllPlayers;
+
+
+    // // TODO: Old version
+    // if (imp_info && pub_info && perf_rec && priv_all) {
+    //   WritePointsTotal(game, state, 0, allocator);
+    // // std::cout << "Writing Hands" << std::endl;
+    //   WriteAllPlayersHands(game, state, 0, allocator);
+    // // std::cout << "Writing Win" << std::endl;
+    //   WriteWinSequence(game, state, 0, allocator);
+    // // std::cout << "Writing Tie" << std::endl;
+    //   WriteTieSequence(game, state, allocator);
+    // // std::cout << "Writing Ooint cards" << std::endl;
+    //   WritePointCardSequence(game, state, allocator);
+    // // std::cout << "Writing actions" << std::endl;
+    //   WriteAllPlayersActionSequences(game, state, allocator);
+    
+    //   return;
+    // }
+
+    //TODO new version
+    // State tensor
+    if (imp_info && pub_info && perf_rec && priv_all) {
+      // TODO: Previous version had more information, so compare the results
+      WritePointCardSequence(game, state, allocator);
+    // std::cout << "Writing actions" << std::endl;
+      WriteAllPlayersActionSequences(game, state, allocator);
+      return;
+    }
+
 
     // Conditionally write each field.
     if (pub_info && !perf_rec) {
@@ -125,6 +156,7 @@ class GoofspielObserver : public Observer {
     if (pub_info) WritePointsTotal(game, state, player, allocator);
     if (imp_info && priv_one) WritePlayerHand(game, state, player, allocator);
     if (imp_info && pub_info) WriteWinSequence(game, state, player, allocator);
+    if (imp_info && pub_info) WriteTieSequence(game, state, allocator);
     if (pub_info && perf_rec) WritePointCardSequence(game, state, allocator);
     if (imp_info && perf_rec && priv_one)
       WritePlayerActionSequence(game, state, player, allocator);
@@ -178,6 +210,7 @@ class GoofspielObserver : public Observer {
     if (pub_info && !imp_info) StringPlayersHands(game, state, &result);
     if (pub_info) {
       StringWinSequence(state, &result);
+      StringTieSequence(state, &result);
       StringPoints(game, state, &result);
     }
     return result;
@@ -231,6 +264,15 @@ class GoofspielObserver : public Observer {
     }
   }
 
+  // Sequence of when a tie was made for each trick.
+  void WriteTieSequence(const GoofspielGame& game, const GoofspielState& state,
+                        Allocator* allocator) const {
+    auto out = allocator->Get("tie_sequence", {game.NumRounds()});
+    for (int i = 0; i < state.win_sequence_.size(); ++i) {
+      if (state.win_sequence_[i] == kInvalidPlayer) out.at(i) = 1.0;
+    }
+  }
+
   void WriteRemainingPointCards(const GoofspielGame& game,
                                 const GoofspielState& state,
                                 Allocator* allocator) const {
@@ -277,6 +319,20 @@ class GoofspielObserver : public Observer {
                               {game.NumRounds(), game.NumCards()});
     for (int round = 0; round < state.actions_history_.size(); ++round) {
       out.at(round, state.actions_history_[round][player]) = 1.0;
+    }
+  }
+
+  void WriteAllPlayersActionSequences(const GoofspielGame& game,
+                                 const GoofspielState& state,
+                                 Allocator* allocator) const {
+
+                                  auto out =
+    allocator->Get("player_action_sequences", {game.NumPlayers(), game.NumRounds(), game.NumCards()});
+    Player p = Player{0};
+    for (int n = 0; n < game.NumPlayers(); state.NextPlayer(&n, &p)) {
+      for (int round = 0; round < state.actions_history_.size(); ++round) {
+        out.at(n, round, state.actions_history_[round][p]) = 1.0;
+      }
     }
   }
 
@@ -342,6 +398,16 @@ class GoofspielObserver : public Observer {
     absl::StrAppend(result, "Win sequence: ");
     for (int i = 0; i < state.win_sequence_.size(); ++i) {
       absl::StrAppend(result, state.win_sequence_[i], " ");
+    }
+    absl::StrAppend(result, "\n");
+  }
+  void StringTieSequence(const GoofspielState& state,
+                         std::string* result) const {
+    absl::StrAppend(result, "Tie sequence: ");
+    for (int i = 0; i < state.win_sequence_.size(); ++i) {
+      if (state.win_sequence_[i] == kInvalidPlayer) {
+        absl::StrAppend(result, state.actions_history_[i][0], " ");
+      }
     }
     absl::StrAppend(result, "\n");
   }
@@ -670,6 +736,13 @@ void GoofspielState::InformationStateTensor(Player player,
   game.info_state_observer_->WriteTensor(*this, player, &allocator);
 }
 
+void GoofspielState::StateTensor(absl::Span<float> values) const {
+  ContiguousAllocator allocator(values);
+  const GoofspielGame& game =
+      open_spiel::down_cast<const GoofspielGame&>(*game_);
+  game.state_observer_->WriteTensor(*this, 0, &allocator);
+}
+
 void GoofspielState::ObservationTensor(Player player,
                                        absl::Span<float> values) const {
   ContiguousAllocator allocator(values);
@@ -718,6 +791,12 @@ GoofspielGame::GoofspielGame(const GameParameters& params)
                                       /*perfect_recall*/false,
                                       /*private_info*/PrivateInfoType::kNone},
                    obs_params);
+
+  state_observer_ = MakeObserver(
+    IIGObservationType{.public_info=true,
+                       .perfect_recall=true,
+                       .private_info=PrivateInfoType::kAllPlayers},
+                       obs_params);
 }
 
 std::unique_ptr<State> GoofspielGame::NewInitialState() const {
@@ -746,6 +825,8 @@ std::vector<int> GoofspielGame::InformationStateTensorShape() const {
             // If `egocentric = false`, returns a sequence of one-hot player id
             // of the winner of a turn.
             num_turns_ * num_players_ +
+            // Tie sequence
+            num_cards_ + 
             // A sequence of 1-hot bit vectors encoding the point card sequence.
             num_turns_ * num_cards_ +
             // The observing player's own action sequence.
@@ -758,6 +839,18 @@ std::vector<int> GoofspielGame::InformationStateTensorShape() const {
             num_turns_ * num_cards_ +
             // Bit vector for each card per player.
             num_players_ * num_cards_};
+  }
+}
+
+
+std::vector<int> GoofspielGame::StateTensorShape() const {
+    if (impinfo_) {
+    return {// A sequence of 1-hot bit vectors encoding the point card sequence.
+            num_turns_ * num_cards_ +
+            // All players action sequence.
+            num_players_ * num_turns_ * num_cards_};
+  } else {
+    return InformationStateTensorShape();
   }
 }
 
