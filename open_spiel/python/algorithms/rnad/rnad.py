@@ -30,7 +30,7 @@ import optax
 from open_spiel.python import policy as policy_lib
 import pyspiel
 
-
+from multiprocessing import Pool
 # Some handy aliases.
 # Since most of these are just aliases for a "bag of tensors", the goal
 # is to improve the documentation, and not to actually enforce correctness
@@ -798,6 +798,9 @@ class RNaDSolver(policy_lib.Policy):
             optax.clip(self.config.clip_gradient)))
     self.optimizer_target = optax_optimizer(
         self.params_target, optax.sgd(self.config.target_network_avg))
+    # self.threads
+    self.np_rngs = [np.random.RandomState(self.config.seed + i) for i in range(self.config.batch_size)]
+    self.pool = Pool(self.config.batch_size)
 
   def loss(self, params: Params, params_target: Params, params_prev: Params,
            params_prev_: Params, ts: TimeStep, alpha: float,
@@ -941,7 +944,8 @@ class RNaDSolver(policy_lib.Policy):
 
   def step(self):
     """One step of the algorithm, that plays the game and improves params."""
-    timestep = self.collect_batch_trajectory()
+    # timestep = self.collect_batch_trajectory()
+    timestep = self.collect_parallel_trajectory()
     alpha, update_target_net = self._entropy_schedule(self.learner_steps)
     (self.params, self.params_target, self.params_prev, self.params_prev_,
      self.optimizer, self.optimizer_target), logs = self.update_parameters(
@@ -1044,6 +1048,14 @@ class RNaDSolver(policy_lib.Policy):
     actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
 
     return action, actor_step
+  
+  def collect_parallel_trajectory(self) -> TimeStep: 
+    pool_input = [(self.network, self.params, self._game, self.config.state_representation, self.config.trajectory_max, np_rng) for np_rng in self.np_rngs]
+    timesteps = self.pool.starmap(collect_single_trajectory, pool_input)
+    timesteps = jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps)
+    timesteps = jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps)
+    return timesteps
+
   def collect_batch_trajectory(self) -> TimeStep:
     states = [
         self._play_chance(self._game.new_initial_state())
@@ -1124,3 +1136,81 @@ class RNaDSolver(policy_lib.Policy):
       action = self._np_rng.choice(chance_outcome, p=chance_proba)
       state.apply_action(action)
     return state
+
+
+def state_as_env_step(state: pyspiel.State, ex_state: pyspiel.State, state_representation: StateRepresentation) -> EnvStep:
+  rewards = state.returns()
+  valid = not state.is_terminal()
+    
+  if not valid:
+    state = ex_state
+
+  if state_representation == StateRepresentation.OBSERVATION:
+    obs = state.observation_tensor()
+  elif state_representation == StateRepresentation.INFO_SET:
+    obs = state.information_state_tensor()
+  else:
+    raise ValueError(
+        f"Invalid StateRepresentation: {state_representation}.")
+    
+  return EnvStep(
+      obs=np.asarray(obs, dtype=np.float32),
+      legal=np.asarray(state.legal_actions_mask(), dtype=np.int8),
+      player_id=np.asarray(state.current_player(), dtype=np.float32),
+      valid=np.asarray(valid, dtype=np.float32),
+      rewards=np.asarray(rewards, dtype=np.float32))
+
+
+@functools.partial(jax.jit, static_argnums=(0,))
+def _network_jit_apply(network, params: Params, env_step: EnvStep) -> chex.Array:
+  pi, _, _, _ = network.apply(params, env_step)
+  return pi
+
+def get_actor_step(network, params: Params, env_step: EnvStep, np_rng) -> Tuple[chex.Array, ActorStep]:
+  pi = _network_jit_apply(network, params, env_step)
+  pi = np.asarray(pi, dtype=np.float32) 
+  action = np_rng.choice(range(pi.shape[0]), p=pi) 
+  action_oh = np.zeros(pi.shape, dtype=np.float32)
+  action_oh[action] = 1.0
+
+  actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())  # pytype: disable=wrong-arg-types  # numpy-scalars
+
+  return action, actor_step
+
+def play_chance(state: pyspiel.State, np_rng) -> pyspiel.State:
+    while state.is_chance_node():
+      chance_outcome, chance_proba = zip(*state.chance_outcomes())
+      action = np_rng.choice(chance_outcome, p=chance_proba)
+      state.apply_action(action)
+    return state
+
+
+def apply_action(
+    state: pyspiel.State,
+    action: int, np_rng) -> pyspiel.State:
+  """Apply a batch of `actions` to a parallel list of `states`."""
+  if not state.is_terminal():
+    state.apply_action(action)
+    state = play_chance(state, np_rng)
+  return state
+ 
+def collect_single_trajectory(network, params: Params, game: pyspiel.Game, state_representation: StateRepresentation, trajectory_max: int, np_rng) -> list[TimeStep]:
+  ex_state = play_chance(game.new_initial_state(), np_rng)
+  state = play_chance(game.new_initial_state(), np_rng)
+  timesteps = []
+  env_step = state_as_env_step(state, ex_state, state_representation)
+  for _ in range(trajectory_max):
+    prev_env_step = env_step
+    a, actor_step = get_actor_step(network, params, env_step, np_rng)
+
+    state = apply_action(state, a, np_rng)
+    env_step = state_as_env_step(state, ex_state, state_representation)
+    timesteps.append(
+        TimeStep(
+            env=prev_env_step,
+            actor=ActorStep(
+                action_oh=actor_step.action_oh,
+                policy=actor_step.policy,
+                rewards=env_step.rewards),
+        ))
+  return timesteps
