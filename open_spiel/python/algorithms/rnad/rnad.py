@@ -966,6 +966,10 @@ class RNaDSolver(policy_lib.Policy):
     self._rngkey, subkey = jax.random.split(self._rngkey)
     return subkey
 
+  def _next_rng_keys(self, keys) -> list[chex.PRNGKey]:
+    self._rngkey, *subkeys = jax.random.split(self._rngkey, keys + 1)
+    return subkeys
+
   def _state_as_env_step(self, state: pyspiel.State) -> EnvStep:
     # A terminal state must be communicated to players, however since
     # it's a terminal state things like the state_representation or
@@ -1017,27 +1021,29 @@ class RNaDSolver(policy_lib.Policy):
     pi = self.config.finetune.post_process_policy(pi, env_step.legal)
     return pi
 
-  @functools.partial(jax.jit, static_argnums=(0,))
-  def _network_jit_apply(self, params: Params, env_step: EnvStep) -> chex.Array:
+  @functools.partial(jax.jit, static_argnums=(0, 1))
+  def _network_jit_apply(self, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
     pi, _, _, _ = self.network.apply(params, env_step)
-    return pi
+
+    def choice_wrapper(key, probs, amount_actions):
+      return jax.random.choice(key, amount_actions, p=probs)
+    
+    vectorized_choice = jax.vmap(choice_wrapper, (0, 0, None), 0)
+    action = vectorized_choice(rngkeys, pi, distinct_actions)
+    action_oh = jax.nn.one_hot(action, distinct_actions)
+    return pi, action, action_oh
 
   def actor_step(self, env_step: EnvStep):
-    pi = self._network_jit_apply(self.params, env_step)
-    pi = np.asarray(pi).astype("float64")
-    # TODO(author18): is this policy normalization really needed?
-    pi = pi / np.sum(pi, axis=-1, keepdims=True)
+    keys = self._next_rng_keys(self.config.batch_size)
+    keys = np.asarray(keys)
+    pi, action, action_oh = self._network_jit_apply(self._game.num_distinct_actions(), self.params, env_step, keys)
+    pi = np.asarray(pi, dtype=np.float32)
+    action = np.asarray(action, dtype=np.int32)
+    action_oh = np.asarray(action_oh, dtype=np.float32)
 
-    action = np.apply_along_axis(
-        lambda x: self._np_rng.choice(range(pi.shape[1]), p=x), axis=-1, arr=pi)
-    # TODO(author16): reapply the legal actions mask to bullet-proof sampling.
-    action_oh = np.zeros(pi.shape, dtype="float64")
-    action_oh[range(pi.shape[0]), action] = 1.0
-
-    actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())  # pytype: disable=wrong-arg-types  # numpy-scalars
+    actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
 
     return action, actor_step
-
   def collect_batch_trajectory(self) -> TimeStep:
     states = [
         self._play_chance(self._game.new_initial_state())
@@ -1062,11 +1068,36 @@ class RNaDSolver(policy_lib.Policy):
           ))
     # Concatenate all the timesteps together to form a single rollout [T, B, ..]
     return jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps)
+ 
+  
+  def _prepare_env_step(self, state: pyspiel.State) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array, chex.Array]:
+    rewards = state.returns()
+    valid = not state.is_terminal()
+    
+    if not valid:
+      state = self._ex_state
+
+    if self.config.state_representation == StateRepresentation.OBSERVATION:
+      obs = state.observation_tensor()
+    elif self.config.state_representation == StateRepresentation.INFO_SET:
+      obs = state.information_state_tensor()
+    else:
+      raise ValueError(
+          f"Invalid StateRepresentation: {self.config.state_representation}.")
+    
+    return rewards, state.legal_actions_mask(), state.current_player(), valid, obs
 
   def _batch_of_states_as_env_step(self,
                                    states: Sequence[pyspiel.State]) -> EnvStep:
-    envs = [self._state_as_env_step(state) for state in states]
-    return jax.tree_util.tree_map(lambda *e: np.stack(e, axis=0), *envs)
+    rewards, action_mask, player, valid, obs = zip(*[self._prepare_env_step(state) for state in states]) 
+
+    return EnvStep(
+        obs=np.asarray(obs, dtype=np.float32),
+        legal=np.asarray(action_mask, dtype=np.int8),
+        player_id=np.asarray(player, dtype=np.float32),
+        valid=np.asarray(valid, dtype=np.float32),
+        rewards=np.asarray(rewards, dtype=np.float32))
+  
 
   def _batch_of_states_apply_action(
       self, states: Sequence[pyspiel.State],
