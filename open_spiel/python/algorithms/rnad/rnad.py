@@ -799,8 +799,8 @@ class RNaDSolver(policy_lib.Policy):
     self.optimizer_target = optax_optimizer(
         self.params_target, optax.sgd(self.config.target_network_avg))
     # self.threads
-    self.np_rngs = [np.random.RandomState(self.config.seed + i) for i in range(self.config.batch_size)]
-    self.pool = Pool(self.config.batch_size)
+    # self.np_rngs = [np.random.RandomState(self.config.seed + i) for i in range(self.config.batch_size)]
+    # self.pool = Pool(self.config.batch_size)
 
   def loss(self, params: Params, params_target: Params, params_prev: Params,
            params_prev_: Params, ts: TimeStep, alpha: float,
@@ -944,8 +944,8 @@ class RNaDSolver(policy_lib.Policy):
 
   def step(self):
     """One step of the algorithm, that plays the game and improves params."""
-    # timestep = self.collect_batch_trajectory()
-    timestep = self.collect_parallel_trajectory()
+    timestep = self.collect_batch_trajectory()
+    # timestep = self.collect_parallel_trajectory()
     alpha, update_target_net = self._entropy_schedule(self.learner_steps)
     (self.params, self.params_target, self.params_prev, self.params_prev_,
      self.optimizer, self.optimizer_target), logs = self.update_parameters(
@@ -1049,6 +1049,7 @@ class RNaDSolver(policy_lib.Policy):
 
     return action, actor_step
   
+  # TODO: Does not work on cluster
   def collect_parallel_trajectory(self) -> TimeStep: 
     pool_input = [(self.network, self.params, self._game, self.config.state_representation, self.config.trajectory_max, np_rng) for np_rng in self.np_rngs]
     timesteps = self.pool.starmap(collect_single_trajectory, pool_input)
