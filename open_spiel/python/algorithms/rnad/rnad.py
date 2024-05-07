@@ -1069,7 +1069,9 @@ class RNaDSolver(policy_lib.Policy):
       prev_env_step = env_step
       a, actor_step = self.actor_step(env_step)
 
-      states = self._batch_of_states_apply_action(states, a)
+      succseful, states = self._batch_of_states_apply_action(states, a)
+      if not succseful:
+        break
       env_step = self._batch_of_states_as_env_step(states)
       timesteps.append(
           TimeStep(
@@ -1079,6 +1081,9 @@ class RNaDSolver(policy_lib.Policy):
                   policy=actor_step.policy,
                   rewards=env_step.rewards),
           ))
+    if not succseful:
+      print("Redoing batch: ", self.learner_steps, flush=True)
+      return self.collect_batch_trajectory()
     # Concatenate all the timesteps together to form a single rollout [T, B, ..]
     return jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps)
  
@@ -1118,10 +1123,12 @@ class RNaDSolver(policy_lib.Policy):
     """Apply a batch of `actions` to a parallel list of `states`."""
     for state, action in zip(states, list(actions)):
       if not state.is_terminal():
+        if action not in state.legal_actions():
+          return False, states
         self.actor_steps += 1
         state.apply_action(action)
         self._play_chance(state)
-    return states
+    return True, states
 
   def _play_chance(self, state: pyspiel.State) -> pyspiel.State:
     """Plays the chance nodes until we end up at another type of node.
