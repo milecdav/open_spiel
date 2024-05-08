@@ -1039,11 +1039,11 @@ class RNaDSolver(policy_lib.Policy):
 
   def actor_step(self, env_step: EnvStep):
     keys = self._next_rng_keys(self.config.batch_size)
-    keys = np.asarray(keys)
+    keys = np.array(keys)
     pi, action, action_oh = self._network_jit_apply(self._game.num_distinct_actions(), self.params, env_step, keys)
-    pi = np.asarray(pi, dtype=np.float32)
-    action = np.asarray(action, dtype=np.int32)
-    action_oh = np.asarray(action_oh, dtype=np.float32)
+    pi = np.array(pi, dtype=np.float32)
+    action = np.array(action, dtype=np.int32)
+    action_oh = np.array(action_oh, dtype=np.float32)
 
     actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
 
@@ -1110,11 +1110,11 @@ class RNaDSolver(policy_lib.Policy):
     rewards, action_mask, player, valid, obs = zip(*[self._prepare_env_step(state) for state in states]) 
 
     return EnvStep(
-        obs=np.asarray(obs, dtype=np.float32),
-        legal=np.asarray(action_mask, dtype=np.int8),
-        player_id=np.asarray(player, dtype=np.float32),
-        valid=np.asarray(valid, dtype=np.float32),
-        rewards=np.asarray(rewards, dtype=np.float32))
+        obs=np.array(obs, dtype=np.float32),
+        legal=np.array(action_mask, dtype=np.int8),
+        player_id=np.array(player, dtype=np.float32),
+        valid=np.array(valid, dtype=np.float32),
+        rewards=np.array(rewards, dtype=np.float32))
   
 
   def _batch_of_states_apply_action(
@@ -1162,11 +1162,11 @@ def state_as_env_step(state: pyspiel.State, ex_state: pyspiel.State, state_repre
         f"Invalid StateRepresentation: {state_representation}.")
     
   return EnvStep(
-      obs=np.asarray(obs, dtype=np.float32),
-      legal=np.asarray(state.legal_actions_mask(), dtype=np.int8),
-      player_id=np.asarray(state.current_player(), dtype=np.float32),
-      valid=np.asarray(valid, dtype=np.float32),
-      rewards=np.asarray(rewards, dtype=np.float32))
+      obs=np.array(obs, dtype=np.float32),
+      legal=np.array(state.legal_actions_mask(), dtype=np.int8),
+      player_id=np.array(state.current_player(), dtype=np.float32),
+      valid=np.array(valid, dtype=np.float32),
+      rewards=np.array(rewards, dtype=np.float32))
 
 
 @functools.partial(jax.jit, static_argnums=(0,))
@@ -1176,7 +1176,7 @@ def _network_jit_apply(network, params: Params, env_step: EnvStep) -> chex.Array
 
 def get_actor_step(network, params: Params, env_step: EnvStep, np_rng) -> Tuple[chex.Array, ActorStep]:
   pi = _network_jit_apply(network, params, env_step)
-  pi = np.asarray(pi, dtype=np.float32) 
+  pi = np.array(pi, dtype=np.float32) 
   action = np_rng.choice(range(pi.shape[0]), p=pi) 
   action_oh = np.zeros(pi.shape, dtype=np.float32)
   action_oh[action] = 1.0
