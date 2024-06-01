@@ -317,6 +317,8 @@ PYBIND11_MODULE(pyspiel, m) {
                                            State::InformationStateTensor)
       .def("state_tensor", (std::vector<float>(State::*)() const) &
                                            State::StateTensor)
+      .def("public_state_tensor", (std::vector<float>(State::*)() const) &
+                                           State::PublicStateTensor)
       .def("observation_string",
            (std::string(State::*)(int) const) & State::ObservationString)
       .def("observation_string",
@@ -372,6 +374,8 @@ PYBIND11_MODULE(pyspiel, m) {
       .def("get_type", &Game::GetType)
       .def("utility_sum", &Game::UtilitySum)
       .def("information_state_tensor_shape", &Game::InformationStateTensorShape)
+      .def("state_tensor_shape", &Game::StateTensorShape)
+      .def("public_state_tensor_shape", &Game::PublicStateTensorShape)
       .def("information_state_tensor_layout",
            &Game::InformationStateTensorLayout)
       .def("information_state_tensor_size", &Game::InformationStateTensorSize)

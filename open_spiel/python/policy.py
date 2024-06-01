@@ -304,6 +304,11 @@ class TabularPolicy(Policy):
     probability = self.policy_for_key(self._state_key(state, player_id))
     return {action: probability[action] for action in legal_actions}
 
+  def sample_action(self, state, player_id=None):
+    probability = self.policy_for_key(self._state_key(state, player_id))
+    return np.random.choice(len(probability), p=probability)
+    
+
   def state_index(self, state):
     """Returns the index in the TabularPolicy associated to `state`."""
     return self.state_lookup[self._state_key(state, state.current_player())]

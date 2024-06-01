@@ -50,6 +50,7 @@ class TurnBasedSimultaneousState : public State {
   void InformationStateTensor(Player player,
                               absl::Span<float> values) const override;
   void StateTensor(absl::Span<float> values) const override;  
+  void PublicStateTensor(absl::Span<float> values) const override;  
   std::string ObservationString(Player player) const override;
   void ObservationTensor(Player player,
                          absl::Span<float> values) const override;
@@ -110,6 +111,11 @@ class TurnBasedSimultaneousGame : public Game {
   std::vector<int> StateTensorShape() const override {
     return {NumDistinctActions() * (NumPlayers() - 1) + game_->StateTensorSize()};
   }
+
+  std::vector<int> PublicStateTensorShape() const override {
+    return {NumPlayers() + game_->PublicStateTensorSize()};
+  }
+
 
   std::vector<int> ObservationTensorShape() const override {
     // We flatten the representation of the underlying game and add one-hot

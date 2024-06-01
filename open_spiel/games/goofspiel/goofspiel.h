@@ -104,6 +104,7 @@ class GoofspielState : public SimMoveState {
   void InformationStateTensor(Player player,
                               absl::Span<float> values) const override;
   void StateTensor(absl::Span<float> values) const override;
+  void PublicStateTensor(absl::Span<float> values) const override;
   void ObservationTensor(Player player,
                          absl::Span<float> values) const override;
   std::unique_ptr<State> Clone() const override;
@@ -153,6 +154,7 @@ class GoofspielGame : public Game {
   absl::optional<double> UtilitySum() const override;
   std::vector<int> InformationStateTensorShape() const override;
   std::vector<int> StateTensorShape() const override;
+  std::vector<int> PublicStateTensorShape() const override;
   std::vector<int> ObservationTensorShape() const override;
   int MaxGameLength() const override { return num_cards_; }
   std::shared_ptr<Observer> MakeObserver(

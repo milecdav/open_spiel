@@ -521,6 +521,12 @@ class State {
   std::vector<float> StateTensor() const;
   virtual void StateTensor(std::vector<float>* values) const;
 
+  virtual void PublicStateTensor(absl::Span<float> values) const {
+    SpielFatalError("PublicStateTensor unimplemented!");
+  }
+  std::vector<float> PublicStateTensor() const;
+  virtual void PublicStateTensor(std::vector<float>* values) const;
+
   // We have functions for observations which are parallel to those for
   // information states. An observation should have the following properties:
   //  - It has at most the same information content as the information state
@@ -847,6 +853,16 @@ class Game : public std::enable_shared_from_this<Game> {
 
   int StateTensorSize() const {
     std::vector<int> shape = StateTensorShape();
+    return shape.empty() ? 0
+                         : absl::c_accumulate(shape, 1, std::multiplies<int>());
+  }
+
+  virtual std::vector<int> PublicStateTensorShape() const {
+    SpielFatalError("PublicStateTensorShape unimplemented.");
+  }
+
+  int PublicStateTensorSize() const {
+    std::vector<int> shape = PublicStateTensorShape();
     return shape.empty() ? 0
                          : absl::c_accumulate(shape, 1, std::multiplies<int>());
   }

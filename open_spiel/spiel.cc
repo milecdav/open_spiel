@@ -818,6 +818,18 @@ void State::StateTensor(std::vector<float>* values) const {
   StateTensor(absl::MakeSpan(*values));
 }
 
+std::vector<float> State::PublicStateTensor() const {
+  std::vector<float> public_state_tensor(game_->PublicStateTensorSize());
+  PublicStateTensor(absl::MakeSpan(public_state_tensor));
+  return public_state_tensor;
+}
+
+void State::PublicStateTensor(std::vector<float>* values) const {
+  // Retained for backwards compatibility.
+  values->resize(game_->PublicStateTensorSize());
+  PublicStateTensor(absl::MakeSpan(*values));
+}
+
 bool State::PlayerAction::operator==(const PlayerAction& other) const {
   return player == other.player && action == other.action;
 }

@@ -18,6 +18,16 @@ import copy
 import numpy as np
 from ortools.sat.python import cp_model
 
+
+def reconstruct_states_from_histories(init_state, histories):
+  states = []
+  for h in histories:
+    state = init_state.clone()
+    for a in h:
+      state.apply_action(a)
+    states.append(state)
+  return states
+
 def reconstruct_goofspiel(state: pyspiel.State, limit: int):
   # TOOD: What about turn-based goofspiel
   assert state.is_chance_node() == False

@@ -224,6 +224,20 @@ void TurnBasedSimultaneousState::StateTensor(absl::Span<float> values) const {
   state_->StateTensor(absl::MakeSpan(value_it, values.end()));
 }
 
+void TurnBasedSimultaneousState::PublicStateTensor(absl::Span<float> values) const {
+  SPIEL_CHECK_EQ(values.size(), game_->PublicStateTensorSize());
+  auto value_it = values.begin();
+
+  // First, encode whose player is playing.
+  for (auto p = Player{0}; p < num_players_; ++p) {
+    *value_it++ = (p == current_player_ ? 1 : 0);
+  }
+
+  // Then get the underlying observation
+  state_->PublicStateTensor(absl::MakeSpan(value_it, values.end()));
+}
+
+
 std::string TurnBasedSimultaneousState::ObservationString(Player player) const {
   SPIEL_CHECK_GE(player, 0);
   SPIEL_CHECK_LT(player, num_players_);

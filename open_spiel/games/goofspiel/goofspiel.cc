@@ -94,6 +94,8 @@ ReturnsType ParseReturnsType(const std::string& returns_type_str) {
 
 }  // namespace
 
+
+
 class GoofspielObserver : public Observer {
  public:
   explicit GoofspielObserver(IIGObservationType iig_obs_type, bool egocentric)
@@ -743,6 +745,14 @@ void GoofspielState::StateTensor(absl::Span<float> values) const {
   game.state_observer_->WriteTensor(*this, 0, &allocator);
 }
 
+void GoofspielState::PublicStateTensor(absl::Span<float> values) const {
+  ContiguousAllocator allocator(values);
+  const GoofspielGame& game =
+      open_spiel::down_cast<const GoofspielGame&>(*game_);
+  game.public_observer_->WriteTensor(*this, 0, &allocator);
+}
+
+
 void GoofspielState::ObservationTensor(Player player,
                                        absl::Span<float> values) const {
   ContiguousAllocator allocator(values);
@@ -788,7 +798,7 @@ GoofspielGame::GoofspielGame(const GameParameters& params)
       obs_params);
   public_observer_ =
       MakeObserver(IIGObservationType{/*public_info*/true,
-                                      /*perfect_recall*/false,
+                                      /*perfect_recall*/true,
                                       /*private_info*/PrivateInfoType::kNone},
                    obs_params);
 
@@ -849,6 +859,24 @@ std::vector<int> GoofspielGame::StateTensorShape() const {
             num_turns_ * num_cards_ +
             // All players action sequence.
             num_players_ * num_turns_ * num_cards_};
+  } else {
+    return InformationStateTensorShape();
+  }
+}
+
+
+std::vector<int> GoofspielGame::PublicStateTensorShape() const {
+    if (impinfo_) {
+    return {// 1-hot bit vector for point total per player; upper bound is 1 +
+            // 2 + ... + N = N*(N+1) / 2, but must add one to include 0 points.
+            num_players_ * ((num_cards_ * (num_cards_ + 1)) / 2 + 1) +
+            // Sequence of one-hot relative
+            // distances to the winner of a turn.
+            num_turns_ * num_players_ +
+            // Tie sequence
+            num_cards_ + 
+            // A sequence of 1-hot bit vectors encoding the point card sequence.
+            num_turns_ * num_cards_};
   } else {
     return InformationStateTensorShape();
   }
