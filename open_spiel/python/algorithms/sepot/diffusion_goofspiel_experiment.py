@@ -5,6 +5,7 @@ import time
 import pickle
 import numpy as np
 
+
 from open_spiel.python.algorithms.sepot.diffusion import FullDiffusionModel
 
 
@@ -30,11 +31,11 @@ parser.add_argument("--save_each", default=100000, type=int, help="Save the mode
 # Sampling arguments
 parser.add_argument("--clamp_result", default=0, type=int, help="Clamp the state while generating to [-1, 1]")
 parser.add_argument("--sampling_algorithm", default="ddpm", type=str, help="Sampling algorithm. Either 'ddpm' or 'ddim'")
-parser.add_argument("--model_path", default="diffusion_models/goofspiel_3_descending/model_ns500_c1_ed1_cd128_ld256_hd256_s42_t10000.pkl", type=str, help="Path to the model, if should be loaded fpr sampling")
+parser.add_argument("--model_path", default="diffusion_models/goofspiel_4_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t100000.pkl", type=str, help="Path to the model, if should be loaded fpr sampling")
 parser.add_argument("--samples", default=2, type=int, help="Amount of samples to generate")
 
 # Game specific arguments
-parser.add_argument("--cards", default=8, type=int, help="Amount of cards in the game")
+parser.add_argument("--cards", default=4, type=int, help="Amount of cards in the game")
 parser.add_argument("--points_order", default="descending", type=str, help="Order of the points. Either 'ascending', 'descending' or 'random'")
  
  
@@ -43,7 +44,7 @@ from pyinstrument import Profiler
 def train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
   
-  game_params = {"num_cards": args.cards, "points_order": args.points_order}
+  game_params = {"num_cards": args.cards, "points_order": args.points_order, "imp_info": True}
   model = FullDiffusionModel("goofspiel", game_params,
                              noise_steps=args.noise_steps,
                              conditional=args.conditional == 1,
@@ -56,6 +57,7 @@ def train():
                              clamp_result=args.clamp_result == 1,
                              seed=args.seed
                              )
+  
   path_to_save = f"diffusion_models/goofspiel_{args.cards}_{args.points_order}"
   if not os.path.exists(path_to_save):
     os.makedirs(path_to_save)
@@ -77,10 +79,10 @@ def sample():
   samples = model.sample(model.game.new_initial_state(), args.samples, args.sampling_algorithm)
   # st = np.asarray(model.game.new_initial_state().state_tensor())
   # st_t = model.transform_from_positive(st)
-  # print(st_t)
+  # print(st)
   # print(model.encode_decode_method(model.params, st_t)[1])
   for i in samples:
-    print(i)
+    print((i >0.5).astype(np.float32))
     
 def main():
   args = parser.parse_args([] if "__file__" not in globals() else None)
