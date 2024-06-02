@@ -287,6 +287,9 @@ class FullDiffusionModel():
     # print("ee")
     
   def __getstate__(self):
+    policy = []
+    if self.policy is not None:
+      policy = self.policy.action_probability_array
     """To serialize the agent."""
     return dict(
         game_name=self.game_name,
@@ -304,6 +307,7 @@ class FullDiffusionModel():
         rng_key = self.rng_key,
         np_rng_key = self.np_rng_key,
         initial_seed = self.initial_seed,
+        policy=policy
         # policy = self.policy.action_probability_array,
     )
     
@@ -325,8 +329,9 @@ class FullDiffusionModel():
     self.params = state["params"]
     self.rng_key = state["rng_key"]
     self.np_rng_key = state["np_rng_key"]
-    # self.policy = TabularPolicy(self.game)
-    # self.policy.action_probability_array = state["policy"]
+    if state["policy"]:
+      self.policy = TabularPolicy(self.game)
+      self.policy.action_probability_array = state["policy"]
     self.train_state = train_state.TrainState.create(apply_fn=self.model.apply, params=self.params, tx=optax.adam(3e-4))  # Is this valid?
     
   def next_key(self):
