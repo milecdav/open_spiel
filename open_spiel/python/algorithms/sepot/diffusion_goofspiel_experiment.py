@@ -64,6 +64,7 @@ def train():
   for i in range(args.training_iterations):
     model.training(1)
     if i % args.save_each == 0:
+      print("Saving model in iteration", i, flush=True)
       file_name = f"model_ns{args.noise_steps}_c{args.conditional}_ed{args.encoder_decoder}_cd{args.conditional_dim}_ld{args.latent_dim}_hd{args.hidden_dim}_s{args.seed}_t{i}.pkl"
       with open(os.path.join(path_to_save, file_name), "wb") as f:
         pickle.dump(model, f)
