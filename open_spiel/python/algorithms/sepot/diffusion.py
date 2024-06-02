@@ -253,7 +253,7 @@ class FullDiffusionModel():
     self.training_regime = training_regime
     self.cache_states, self.cache_conditions = None, None
     
-    
+    self.policy = None
     # self.policy.action_probability_array
     # Policy that is random
     if self.training_regime == "traj_p":
@@ -329,7 +329,7 @@ class FullDiffusionModel():
     self.params = state["params"]
     self.rng_key = state["rng_key"]
     self.np_rng_key = state["np_rng_key"]
-    if state["policy"]:
+    if len(state["policy"]) >0:
       self.policy = TabularPolicy(self.game)
       self.policy.action_probability_array = state["policy"]
     self.train_state = train_state.TrainState.create(apply_fn=self.model.apply, params=self.params, tx=optax.adam(3e-4))  # Is this valid?
@@ -782,7 +782,7 @@ def eval_diff(model_name):
     p = 1.0
     state = model.game.new_initial_state()
     for i, action in enumerate(h):
-      # p *= model.policy.action_probabilities(state)[action]
+      p *= model.policy.action_probabilities(state)[action]
       state.apply_action(action)
     probs.append(p)
     state_tensors.append(state.state_tensor())
@@ -837,7 +837,7 @@ def test_noise():
   
 if __name__ == "__main__":
   jnp.set_printoptions(precision=3, threshold=sys.maxsize)
-  model_name = "diffusion_models/goofspiel_4_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t1000000.pkl"
+  model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t500000.pkl"
   # test_noise()
   eval_diff(model_name)
   # train_diff(model_name)
