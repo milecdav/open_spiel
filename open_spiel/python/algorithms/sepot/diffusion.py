@@ -204,7 +204,7 @@ def conditional_diffuse_helper(module, x, c, t):
 
 class FullDiffusionModel():
   
-  def __init__(self, game_name, game_params, noise_steps=500, cond_dim=128, latent_dim=256, hidden_dim=256, conditional=False, training_regime="all", clamp_result=True, sampled_trajectories=1, encoder_decoder=False, seed=42):
+  def __init__(self, game_name, game_params, noise_steps=500, cond_dim=128, latent_dim=256, hidden_dim=256, conditional=False, training_regime="all", clamp_result=True, sampled_trajectories=1, encoder_decoder=False, seed=42, stop_training_encoder=10000):
     self.game_name = game_name
     self.game_params = game_params
     self.game = pyspiel.load_game_as_turn_based(game_name, game_params)
@@ -218,6 +218,8 @@ class FullDiffusionModel():
     self.clamp_result = clamp_result
     self.sampled_trajectories = sampled_trajectories
     self.initial_seed = seed
+    
+    self.stop_training_encoder = stop_training_encoder
     
     self.temp_state_tensor = jnp.asarray([self.game_state.state_tensor()])
     self.temp_public_state_tensor = jnp.asarray([self.game_state.public_state_tensor()])
@@ -501,7 +503,7 @@ class FullDiffusionModel():
     return train_state, loss
   
   @functools.partial(jax.jit, static_argnums=(0,))
-  def training_encoder_step2(self, train_state, time_step_key, eps_key, states):
+  def training_encoder_step_no_encoder(self, train_state, time_step_key, eps_key, states):
     states = self.transform_from_positive(states)
     
     timesteps = jax.random.choice(time_step_key, self.noise_steps, shape=(states.shape[0], 1))
@@ -511,21 +513,18 @@ class FullDiffusionModel():
   
     
     def loss_only_diff(params):
-      # encoded, decoded = self.encode_decode_method(params, states)
-      encoded = jnp.concatenate([states, jnp.zeros((states.shape[0], self.latent_dim - states.shape[1]))], axis=-1)
+      encoded, decoded = self.encode_decode_method(params, states)
+      # encoded = jnp.concatenate([states, jnp.zeros((states.shape[0], self.latent_dim - states.shape[1]))], axis=-1)
       noise_eps, noised_states = self.generate_noise(encoded, timesteps, eps_key)
       # noised_states = encoded * jax.lax.stop_gradient(jnp.sqrt(alpha_bar)) + jax.lax.stop_gradient(noise_eps) * jax.lax.stop_gradient(jnp.sqrt(1 - alpha_bar))
-      # predicted_noise = self.diff_method(params, jax.lax.stop_gradient(noised_states), timesteps)
-      predicted_noise = self.diff_method(params, noised_states, timesteps)
-      # return jnp.mean((jax.lax.stop_gradient(noise_eps) - predicted_noise) ** 2) 
-      # return jnp.mean((states - decoded) ** 2) + jnp.mean((noise_eps - predicted_noise) ** 2)
-      # return jnp.mean((jax.lax.stop_gradient(noise_eps) - predicted_noise) ** 2)
+      predicted_noise = self.diff_method(params, jax.lax.stop_gradient(noised_states), timesteps) 
       return jnp.mean((jax.lax.stop_gradient(noise_eps) - predicted_noise) ** 2)
     
     grad_fn = jax.value_and_grad(loss_only_diff, has_aux = False)
     loss, grad = grad_fn(train_state.params)
     train_state = train_state.apply_gradients(grads=grad)
     return train_state, loss
+  
   
   
   @functools.partial(jax.jit, static_argnums=(0,))
@@ -542,6 +541,27 @@ class FullDiffusionModel():
       predicted_noise = self.diff_method(params, noised_states, conditions, timesteps)
       # return jnp.mean((states - decoded) ** 2) + jnp.mean((noise_eps - predicted_noise) ** 2)
       return jnp.mean((jax.lax.stop_gradient(states) - decoded) ** 2) + jnp.mean((jax.lax.stop_gradient(noise_eps) - predicted_noise) ** 2)
+      
+    grad_fn = jax.value_and_grad(loss_fn, has_aux = False)
+    loss, grad = grad_fn(train_state.params)
+    train_state = train_state.apply_gradients(grads=grad)
+    return train_state, loss
+    
+
+  @functools.partial(jax.jit, static_argnums=(0,))
+  def training_encoder_conditional_step_no_encoder(self, train_state, time_step_key, eps_key, states, conditions):
+    states = self.transform_from_positive(states)
+    conditions = self.transform_from_positive(conditions)
+    
+    timesteps = jax.random.choice(time_step_key, self.noise_steps, shape=(states.shape[0], 1))
+    timesteps = timesteps/self.noise_steps
+    
+    def loss_fn(params):
+      encoded, decoded = self.encode_decode_method(params, states)
+      noise_eps, noised_states = self.generate_noise(encoded, timesteps, eps_key)
+      predicted_noise = self.diff_method(params, jax.lax.stop_gradient(noised_states), conditions, timesteps)
+      # return jnp.mean((states - decoded) ** 2) + jnp.mean((noise_eps - predicted_noise) ** 2)
+      return jnp.mean((jax.lax.stop_gradient(noise_eps) - predicted_noise) ** 2)
       
     grad_fn = jax.value_and_grad(loss_fn, has_aux = False)
     loss, grad = grad_fn(train_state.params)
@@ -579,13 +599,16 @@ class FullDiffusionModel():
         states, conditions = self.generate_trajectories_with_policy()
       
       if self.conditional and self.encoder_decoder:
-        self.train_state, loss = self.training_encoder_conditional_step(self.train_state, time_step_key, eps_key, states, conditions)
+        if i < self.stop_training_encoder:
+          self.train_state, loss = self.training_encoder_conditional_step(self.train_state, time_step_key, eps_key, states, conditions)
+        else:
+          self.train_state, loss = self.training_encoder_conditional_step_no_encoder(self.train_state, time_step_key, eps_key, states, conditions)
       
       elif not self.conditional and self.encoder_decoder:
-        # if i < 0:
-        self.train_state, loss = self.training_encoder_step(self.train_state, time_step_key, eps_key, states)
-        # else:
-          # self.train_state, loss = self.training_encoder_step2(self.train_state, time_step_key, eps_key, states)
+        if i < self.stop_training_encoder:
+          self.train_state, loss = self.training_encoder_step(self.train_state, time_step_key, eps_key, states)
+        else:
+          self.train_state, loss = self.training_encoder_step_no_encoder(self.train_state, time_step_key, eps_key, states)
       
       elif self.conditional and not self.encoder_decoder:
         self.train_state, loss = self.training_conditional_step(self.train_state, time_step_key, eps_key, states, conditions)
@@ -726,11 +749,11 @@ def train_to_eval():
     print(i)
   
 def train_diff(model_name): 
-  model = FullDiffusionModel("goofspiel", {"num_cards": 5, "imp_info": True, "points_order": "descending"}, conditional = True, training_regime="all", sampled_trajectories=20, clamp_result=False)
+  model = FullDiffusionModel("goofspiel", {"num_cards": 4, "imp_info": True, "points_order": "descending"}, conditional = False,  encoder_decoder=True, training_regime="all", sampled_trajectories=20, clamp_result=True)
   profiler = Profiler()
   profiler.start()
   # print(model.params)
-  model.training(4000)
+  model.training(20000)
   print(model.train_state.step)
   profiler.stop()
   print(profiler.output_text(color=True, unicode=True))
@@ -750,7 +773,8 @@ def train_diff(model_name):
 def eval_d(model_name):
   with open(model_name, "rb") as f:
     model = pickle.load(f)
-    
+  if model.clamp_result is False:
+    model.clamp_result = True
   state = model.game.new_initial_state()
   state.apply_action(0)
   state.apply_action(3)
@@ -837,12 +861,13 @@ def test_noise():
   
 if __name__ == "__main__":
   jnp.set_printoptions(precision=3, threshold=sys.maxsize)
-  model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t500000.pkl"
+  # model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t500000.pkl"
   # test_noise()
-  eval_diff(model_name)
+  # eval_diff(model_name)
+  model_name = "test_ec.pkl"
   # train_diff(model_name)
   # eval_d(model_name)
-  # eval_diff(model_name)
+  eval_d(model_name)
   
   # ddpm_train_loop()
   # ddpm_train_loop()

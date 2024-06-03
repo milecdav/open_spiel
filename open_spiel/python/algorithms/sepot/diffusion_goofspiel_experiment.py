@@ -27,11 +27,12 @@ parser.add_argument("--training_sampling", default="traj", type=str, help="Sampl
 parser.add_argument("--sampled_trajectories", default=10, type=int, help="Amount of sampled trajectories for samplings 'traj' and 'traj_p'")
 parser.add_argument("--training_iterations", default=1000001, type=int, help="Amount of training iterations")
 parser.add_argument("--save_each", default=100000, type=int, help="Save the model each that many iterations")
+parser.add_argument("--stop_training_encoder", default=9999999999, type=int, help="Iteration in which encoder training stops (if encoder_decoder is true)")
 
 # Sampling arguments
-parser.add_argument("--clamp_result", default=0, type=int, help="Clamp the state while generating to [-1, 1]")
+parser.add_argument("--clamp_result", default=1, type=int, help="Clamp the state while generating to [-1, 1]")
 parser.add_argument("--sampling_algorithm", default="ddpm", type=str, help="Sampling algorithm. Either 'ddpm' or 'ddim'")
-parser.add_argument("--model_path", default="diffusion_models/goofspiel_4_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t100000.pkl", type=str, help="Path to the model, if should be loaded fpr sampling")
+parser.add_argument("--model_path", default="diffusion_models/goofspiel_8_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t7400000.pkl", type=str, help="Path to the model, if should be loaded fpr sampling")
 parser.add_argument("--samples", default=2, type=int, help="Amount of samples to generate")
 
 # Game specific arguments
@@ -55,7 +56,8 @@ def train():
                              sampled_trajectories=args.sampled_trajectories,
                              training_regime=args.training_sampling,
                              clamp_result=args.clamp_result == 1,
-                             seed=args.seed
+                             seed=args.seed,
+                             stop_training_encoder=args.stop_training_encoder,
                              )
   
   path_to_save = f"diffusion_models/goofspiel_{args.cards}_{args.points_order}"
@@ -78,11 +80,12 @@ def sample():
     model = pickle.load(f)
   model.clamp_result = args.clamp_result == 1
   samples = model.sample(model.game.new_initial_state(), args.samples, args.sampling_algorithm)
-  # st = np.asarray(model.game.new_initial_state().state_tensor())
+  st = np.asarray(model.game.new_initial_state().state_tensor())
   # st_t = model.transform_from_positive(st)
-  # print(st)
+  print(st)
   # print(model.encode_decode_method(model.params, st_t)[1])
   for i in samples:
+    # print(i)
     print((i >0.5).astype(np.float32))
     
 def main():
@@ -96,3 +99,5 @@ def main():
     
 if __name__ == "__main__":
   main()
+  # train(s)
+  # sample()
