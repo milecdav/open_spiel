@@ -364,8 +364,10 @@ class FullDiffusionModel():
     for _ in range(self.sampled_trajectories):
       state = self.game.new_initial_state()
       while not state.is_terminal():
-        states.append(state.state_tensor())
-        public_states.append(state.public_state_tensor())
+        tensor = state.state_tensor()
+        if tensor not in states:
+          states.append(tensor)
+          public_states.append(state.public_state_tensor())
         action = self.policy.sample_action(state)
         state.apply_action(action)
     return np.asarray(states), np.asarray(public_states) 
@@ -377,8 +379,10 @@ class FullDiffusionModel():
     for _ in range(self.sampled_trajectories):
       state = self.game.new_initial_state()
       while not state.is_terminal():
-        states.append(state.state_tensor())
-        public_states.append(state.public_state_tensor())
+        tensor = state.state_tensor()
+        if tensor not in states:
+          states.append(tensor)
+          public_states.append(state.public_state_tensor())
         action = self.np_rng_key.choice(state.legal_actions())
         state.apply_action(action)
     return np.asarray(states), np.asarray(public_states) 
@@ -864,7 +868,7 @@ if __name__ == "__main__":
   # model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed0_cd128_ld256_hd256_s42_t500000.pkl"
   # test_noise()
   # eval_diff(model_name)
-  model_name = "test_ec.pkl"
+  model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed1_cd128_ld128_hd256_s42_t1000000.pkl"
   # train_diff(model_name)
   # eval_d(model_name)
   eval_d(model_name)
