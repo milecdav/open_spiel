@@ -241,7 +241,7 @@ class FullDiffusionModel():
     self.np_rng_key = np.random.default_rng(seed)
   
     # print("params")
-    self.params = self.model.init(self.next_key(), self.temp_state_tensor, self.temp_public_state_tensor, jnp.asarray([[0]])) if self.conditional else self.model.init(self.next_key(), self.temp_state_tensor, jnp.asarray([[0]]))
+    self.params = self.model.init(self.next_key(), self.temp_state_tensor, self.temp_public_state_tensor, jnp.asarray([[0.0]])) if self.conditional else self.model.init(self.next_key(), self.temp_state_tensor, jnp.asarray([[0.0]]))
     # print("aa")
     if conditional:
       self.diff_method = nn.apply(conditional_diffuse_helper, self.model)
@@ -572,6 +572,21 @@ class FullDiffusionModel():
     train_state = train_state.apply_gradients(grads=grad)
     return train_state, loss
     
+  def train_enchoder(self, train_state, anchor, positive, negative):
+  
+    def triplet_loss(params):
+      anchor_embedding = self.encode_method(params, anchor)
+      positive_embedding = self.encode_method(params, positive)
+      negative_embedding = self.encode_method(params, negative)
+      positive_distance = jnp.linalg.norm(anchor_embedding - positive_embedding, axis=-1)
+      negative_distance = jnp.linalg.norm(anchor_embedding - negative_embedding, axis=-1)
+      return jnp.mean(jnp.maximum(positive_distance - negative_distance + 1, 0))
+    
+    grad_fn = jax.value_and_grad(triplet_loss, has_aux = False)
+    loss, grad = grad_fn(train_state.params)
+    train_state = train_state.apply_gradients(grads=grad)
+    return train_state, loss
+    
   
   def predict_noise(self, states, timesteps):
     return self.diff_model.apply(self.train_state.params, states, timesteps)
@@ -722,7 +737,7 @@ def test_runnability():
   
 def train_to_eval():
   model_name = "test2.pkl"
-  model = FullDiffusionModel("goofspiel", {"num_cards": 4, "imp_info": True, "points_order": "descending"}, training_regime="all", sampled_trajectories=20, clamp_result=False, conditional=True, encoder_decoder=True, latent_dim = 128)
+  model = FullDiffusionModel("goofspiel", {"num_cards": 4, "imp_info": True, "points_order": "descending"}, training_regime="all", sampled_trajectories=20, clamp_result=False, conditional=False, encoder_decoder=False, latent_dim = 128)
   # state = model.game.new_initial_state()
   # samples = model.sample(state, 2, "ddpm")
   # for i in samples:
@@ -869,9 +884,10 @@ if __name__ == "__main__":
   # test_noise()
   # eval_diff(model_name)
   model_name = "diffusion_models/goofspiel_5_descending/model_ns500_c1_ed1_cd128_ld128_hd256_s42_t1000000.pkl"
+  train_to_eval()
   # train_diff(model_name)
   # eval_d(model_name)
-  eval_d(model_name)
+  # eval_d(model_name)
   
   # ddpm_train_loop()
   # ddpm_train_loop()
