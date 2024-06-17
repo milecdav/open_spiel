@@ -43,7 +43,7 @@ def main():
   game = "goofspiel"
   game_params = {"num_cards": cards, "points_order": "descending", "imp_info": True}
   game_params = [(k, v) for k, v in game_params.items()]
-  schedule_step = 2000
+  schedule_step = 10000
   config = rnad.RNaDConfig(game_name = game, game_params=game_params, 
                            batch_size=32, 
                            entropy_schedule_repeats = (20, 1 ), 
