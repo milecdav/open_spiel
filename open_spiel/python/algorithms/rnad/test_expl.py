@@ -35,9 +35,10 @@ def compute_exploitability(solver):
     for a in range(game.num_distinct_actions()):
       state_policy[a] = pis[i][a]
   exp = exploitability.exploitability(game, rnad_pols)
-  print(exp)
+  print(exp, flush=True)
 
 def main():
+  args = parser.parse_args([] if "__file__" not in globals() else None)
   cards = 5
   trajectory_max = (cards - 1) * 2
   game = "goofspiel"
@@ -51,7 +52,7 @@ def main():
                            learning_rate = 3e-4,
                            c_vtrace = 1.0,
                            trajectory_max = trajectory_max,
-                           epsilon=0.5        
+                           epsilon=args.epsilon
   )
   solver = rnad.RNaDSolver(config)
   # compute_exploitability(solver)
