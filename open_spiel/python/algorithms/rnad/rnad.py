@@ -648,7 +648,7 @@ class RNaDConfig:
 
   # Options related to fine tuning of the agent.
   finetune: FineTuning = FineTuning()
-
+  epsilon: float = 0.0
   # The seed that fully controls the randomness.
   seed: int = 42
 
@@ -843,8 +843,11 @@ class RNaDSolver(policy_lib.Policy):
     loss_v = get_loss_v([v] * self._game.num_players(), v_target_list,
                         has_played_list)
 
+  
     is_vector = jnp.expand_dims(jnp.ones_like(ts.env.valid), axis=-1)
     importance_sampling_correction = [is_vector] * self._game.num_players()
+    policy_ratio = _policy_ratio(policy_pprocessed, ts.actor.policy, ts.actor.action_oh, ts.env.valid)
+    importance_sampling_correction = [jnp.expand_dims(jnp.where(ts.env.player_id == pl, policy_ratio, 1), -1) for pl in range(self._game.num_players())]
     # Uses v-trace to define q-values for Nerd
     loss_nerd = get_loss_nerd(
         [logit] * self._game.num_players(), [pi] * self._game.num_players(),
@@ -1028,7 +1031,9 @@ class RNaDSolver(policy_lib.Policy):
   @functools.partial(jax.jit, static_argnums=(0, 1))
   def _network_jit_apply(self, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
     pi, _, _, _ = self.network.apply(params, env_step)
-
+    
+    pi = ((1 - self.config.epsilon) * pi + self.config.epsilon / jnp.sum(env_step.legal, axis=-1, keepdims=True)) * env_step.legal
+    
     def choice_wrapper(key, probs, amount_actions):
       return jax.random.choice(key, amount_actions, p=probs)
     
