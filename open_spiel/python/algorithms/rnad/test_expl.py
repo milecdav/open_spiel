@@ -29,7 +29,7 @@ def compute_exploitability(solver):
     batch_states.append(solver._state_as_env_step(all_states[iset]))
     batch_isets.append(iset)
   # batch_states = jnp.asarray(batch_states)
-  pis, _, _ ,_ = rollout(solver.params_target, jax.tree_util.tree_map(lambda *e: jnp.stack(e, axis=0), *batch_states))
+  pis, _, _, _ ,_ = rollout(solver.params_target, jax.tree_util.tree_map(lambda *e: jnp.stack(e, axis=0), *batch_states))
   for i in range(len(batch_isets)):
     state_policy = rnad_pols.policy_for_key(batch_isets[i])
     for a in range(game.num_distinct_actions()):
@@ -44,21 +44,33 @@ def main():
   game = "goofspiel"
   game_params = {"num_cards": cards, "points_order": "descending", "imp_info": True}
   game_params = [(k, v) for k, v in game_params.items()]
-  schedule_step = 10000
+  
+  
+  # game = "leduc_poker"
+  # game_params = []
+  # trajectory_max = 8
+  
+  schedule_step = 5000
   config = rnad.RNaDConfig(game_name = game, game_params=game_params, 
                            batch_size=32, 
                            entropy_schedule_repeats = (20, 1 ), 
                            entropy_schedule_size = (schedule_step, schedule_step * 4),
                            learning_rate = 3e-4,
-                           c_vtrace = 1.0,
+                           c_vtrace = 3.0,
                            trajectory_max = trajectory_max,
-                           epsilon=args.epsilon
+                           clip_gradient= 10000.0,
+                           epsilon=args.epsilon,
+                           nerd=rnad.NerdConfig(beta=2.0, clip=100.0)
   )
   solver = rnad.RNaDSolver(config)
   # compute_exploitability(solver)
-  for i in range(100):
+  for i in range(20):
     compute_exploitability(solver)
     for j in range(schedule_step):
+      solver.step()
+  for i in range(200):
+    compute_exploitability(solver)
+    for j in range(schedule_step * 4):
       solver.step()
   # with open("mu_zero_test.pkl", "wb") as f:
   #   pickle.dump(solver, f)

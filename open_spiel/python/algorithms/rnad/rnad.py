@@ -395,6 +395,186 @@ def _has_played(valid: chex.Array, player_id: chex.Array,
 # out of the box because a trajectory could look like '121211221122'.
 
 
+def v_trace_my(
+    v: chex.Array,
+    q: chex.Array, # [T, B, A]
+    valid: chex.Array,
+    player_id: chex.Array,
+    acting_policy: chex.Array,
+    merged_policy: chex.Array,
+    merged_log_policy: chex.Array,
+    player_others: chex.Array,
+    actions_oh: chex.Array,
+    reward: chex.Array,
+    player: int,
+    # Scalars below.
+    eta: float,
+    lambda_: float,
+    c: float,
+    rho: float,
+):
+  
+  gamma = 1.0
+
+  has_played = _has_played(valid, player_id, player)
+
+  policy_ratio = _policy_ratio(merged_policy, acting_policy, actions_oh, valid)[..., jnp.newaxis]
+  inv_mu = _policy_ratio(
+      jnp.ones_like(merged_policy), acting_policy, actions_oh, valid)[..., jnp.newaxis]
+ 
+  eta_log_policy = -eta * merged_log_policy * player_others
+  reward = jnp.expand_dims(reward, axis=-1)
+  
+  @chex.dataclass(frozen=True)
+  class LoopVTraceCarry:
+    reward: chex.Array # r_t+1  from opponents turns, regularized but not IS corrected
+    next_value: chex.Array # v(x_t+1) from my turn
+    next_delta_v: chex.Array # delta_t+1 V from my turn
+    next_v_target: chex.Array # v_t+1  from my turn
+    next_q_value: chex.Array
+    next_delta_q: chex.Array
+    next_q_target: chex.Array
+    importance_sampling: chex.Array # epsilon from opponents turns
+  
+  init_state_v_trace = LoopVTraceCarry(
+      reward=jnp.zeros_like(reward[-1]),
+      next_value=jnp.zeros_like(v[-1]),
+      next_delta_v=jnp.zeros_like(v[-1]),
+      next_v_target=jnp.zeros_like(v[-1]),
+      next_q_value=jnp.zeros_like(v[-1]),
+      next_delta_q=jnp.zeros_like(v[-1]),
+      next_q_target=jnp.zeros_like(v[-1]),
+      importance_sampling=jnp.ones_like(policy_ratio[-1]))
+  
+  def _loop_v_trace(carry: LoopVTraceCarry, x) -> Tuple[LoopVTraceCarry, Any]:
+    (cs, player_id, v, q, reward, valid, inv_mu, actions_oh,
+     eta_log_policy) = x
+    
+    # current_q_value = jnp.sum(q * actions_oh, axis=-1, keepdims=True)
+    
+    regularized_reward = reward + jnp.sum(eta_log_policy * actions_oh, axis=-1, keepdims=True) + gamma * carry.reward # Takes into accout even reward if the player did not act
+    rho_t = jnp.minimum(rho, cs * carry.importance_sampling)
+    c_t = jnp.minimum(c, cs * carry.importance_sampling)
+
+    delta_v_uncorrected = regularized_reward + gamma * carry.next_value - v
+    next_delta_v = delta_v_uncorrected + gamma * carry.next_delta_v
+    v_target = v + rho_t * next_delta_v
+    
+    # TODO: This may be wasteful because we will use only a single value, but I wanted to keep the dimensions consistent so we have all the actions in q
+    curr_q = jnp.sum(q * actions_oh, axis=-1, keepdims=True)
+    delta_q_uncorrected = regularized_reward + gamma * carry.next_value - curr_q
+    next_delta_q = delta_q_uncorrected + gamma * carry.next_delta_q
+    q_target = curr_q + rho_t * next_delta_q
+    
+    
+    # delta_q_uncorrected = 
+    
+    # v_target = v + delta_v + c_t * gamma * (carry.next_v_target - carry.next_value)
+    
+    # V-target:
+    # our_v_target = (
+    #     v + jnp.expand_dims(
+    #         jnp.minimum(rho, cs * carry.importance_sampling), axis=-1) *
+    #     (jnp.expand_dims(reward_uncorrected, axis=-1) +
+    #      gamma * carry.next_value - v) + lambda_ * jnp.expand_dims(
+    #          jnp.minimum(c, cs * carry.importance_sampling), axis=-1) * gamma *
+    #     (carry.next_v_target - carry.next_value))
+
+    opp_v_target = jnp.zeros_like(v_target)
+    reset_v_target = jnp.zeros_like(v_target)
+    opp_q_target = jnp.zeros_like(q_target)
+    reset_q_target = jnp.zeros_like(q_target)
+
+    # a =  (carry.reward_uncorrected - carry.next_value)
+    # b = jnp.expand_dims(carry.importance_sampling, -1) * a
+    
+    our_learning_output = q + actions_oh  *  (next_delta_q)
+    
+    
+    # our_learning_output = (
+    #   (eta_log_policy * (1-actions_oh))  
+    #   + actions_oh 
+    #   * inv_mu 
+    #   * (next_delta_v  + v)
+    # )
+    
+    # This works quite well
+    # our_learning_output = (
+    #   v + 
+    #   (eta_log_policy) #* (1-actions_oh)) # Maybe the regularization should be only for non-played actions
+    #   + actions_oh * inv_mu * (next_delta_v - eta_log_policy)
+    # )
+    
+    
+    # our_learning_output = (
+    #   v + eta_log_policy
+    #   + actions_oh * jnp.expand_dims(inv_mu, axis=-1) * (jnp.expand_dims(reward, axis=-1) 
+    #                                                      - eta_log_policy 
+    #                                                      + gamma * jnp.expand_dims(carry.importance_sampling, axis=-1) * (jnp.expand_dims(carry.reward_uncorrected, -1) - carry.next_v_target) - v)
+    # )
+    # Learning output:
+    # our_learning_output = (
+    #     v +  # value
+    #     eta_log_policy +  # regularisation
+    #     actions_oh * jnp.expand_dims(inv_mu, axis=-1) *
+    #     (jnp.expand_dims(discounted_reward, axis=-1) + gamma * jnp.expand_dims(
+    #         carry.importance_sampling, axis=-1) * carry.next_v_target - v))
+    # TODO: change that importance sampling is clipped only if player is acting (should have better rsults)
+    opp_learning_output = jnp.zeros_like(our_learning_output)
+    reset_learning_output = jnp.zeros_like(our_learning_output)
+
+    # State carry:
+    our_carry = LoopVTraceCarry(
+        reward=jnp.zeros_like(carry.reward),
+        next_value=v,
+        next_delta_v= c_t * next_delta_v,
+        next_v_target= v_target,
+        next_q_value= curr_q,
+        next_delta_q= c_t * next_delta_q,
+        next_q_target= q_target,
+        importance_sampling=jnp.ones_like(carry.importance_sampling))
+        # reward=jnp.zeros_like(carry.reward),
+        # next_value=v,
+        # next_v_target=our_v_target,
+        # reward_uncorrected=jnp.zeros_like(carry.reward_uncorrected),
+        # importance_sampling=jnp.ones_like(carry.importance_sampling))
+    opp_carry = LoopVTraceCarry(
+        reward=regularized_reward,
+        next_value=gamma * c_t * carry.next_value,
+        next_delta_v= gamma * c_t * carry.next_delta_v,
+        next_v_target= v_target,
+        next_q_value= gamma * c_t * carry.next_q_value,
+        next_delta_q= gamma * c_t * carry.next_delta_q,
+        next_q_target= q_target,
+        importance_sampling= cs * carry.importance_sampling)
+        # reward=eta_reg_entropy + cs * discounted_reward,
+        # reward_uncorrected=reward_uncorrected,
+        # next_value=gamma * carry.next_value,
+        # next_v_target=gamma * carry.next_v_target,
+        # importance_sampling=cs * carry.importance_sampling)
+    reset_carry = init_state_v_trace
+
+    # Invalid turn: init_state_v_trace and (zero target, learning_output)
+    # pyformat: disable
+    return _where(valid,  # pytype: disable=bad-return-type  # numpy-scalars
+                  _where((player_id == player),
+                         (our_carry, (v_target, q_target, our_learning_output)),
+                         (opp_carry, (opp_v_target, opp_q_target, opp_learning_output))),
+                  (reset_carry, (reset_v_target, reset_q_target, reset_learning_output)))
+    
+    
+  
+  
+  _, (v_target, q_target, learning_output) = lax.scan(
+      f=_loop_v_trace,
+      init=init_state_v_trace,
+      xs=(policy_ratio, player_id, v, q, reward,  valid, inv_mu,
+          actions_oh, eta_log_policy),
+      reverse=True)
+
+  return v_target, q_target, has_played, learning_output
+
+
 def v_trace(
     v: chex.Array,
     valid: chex.Array,
@@ -443,7 +623,67 @@ def v_trace(
       next_value=jnp.zeros_like(v[-1]),
       next_v_target=jnp.zeros_like(v[-1]),
       importance_sampling=jnp.ones_like(policy_ratio[-1]))
+  
 
+  def _loop_v_trace2(carry: LoopVTraceCarry, x) -> Tuple[LoopVTraceCarry, Any]:
+    (cs, player_id, v, reward, eta_reg_entropy, valid, inv_mu, actions_oh,
+     eta_log_policy) = x
+    
+    regularized_reward = reward + jnp.sum(eta_log_policy * actions_oh, axis=-1) 
+    
+    rho_t = jnp.expand_dims(jnp.minimum(rho, cs * carry.importance_sampling), axis=-1)
+    c_t = jnp.expand_dims(jnp.minimum(c, cs * carry.importance_sampling), axis=-1)
+    # single_action_cs = cs * 
+    delta_v = rho_t * (jnp.expand_dims(regularized_reward, axis=-1) + jnp.expand_dims(cs * carry.reward_uncorrected, -1) + gamma * carry.next_value - v)
+    our_v_target = v + delta_v + c_t * gamma * (carry.next_v_target - carry.next_value)
+    # V-target:
+
+    opp_v_target = jnp.zeros_like(our_v_target)
+    reset_v_target = jnp.zeros_like(our_v_target)
+
+    # a =  (carry.reward_uncorrected - carry.next_value)
+    # b = jnp.expand_dims(carry.importance_sampling, -1) * a
+    our_learning_output = (
+      v #+ eta_log_policy
+      + actions_oh * jnp.expand_dims(inv_mu, axis=-1) * (jnp.expand_dims(regularized_reward, axis=-1) 
+                                                        #  - eta_log_policy 
+                                                         + gamma * jnp.expand_dims(cs, axis=-1) * (jnp.expand_dims(carry.reward_uncorrected, -1) + carry.next_v_target) - v)
+    )
+    # Learning output:
+    # our_learning_output = (
+    #     v +  # value
+    #     eta_log_policy +  # regularisation
+    #     actions_oh * jnp.expand_dims(inv_mu, axis=-1) *
+    #     (jnp.expand_dims(discounted_reward, axis=-1) + gamma * jnp.expand_dims(
+    #         carry.importance_sampling, axis=-1) * carry.next_v_target - v))
+
+    opp_learning_output = jnp.zeros_like(our_learning_output)
+    reset_learning_output = jnp.zeros_like(our_learning_output)
+
+    # State carry:
+    our_carry = LoopVTraceCarry(
+        reward=jnp.zeros_like(carry.reward),
+        next_value=v,
+        next_v_target=our_v_target,
+        reward_uncorrected=jnp.zeros_like(carry.reward_uncorrected),
+        importance_sampling=jnp.ones_like(carry.importance_sampling))
+    opp_carry = LoopVTraceCarry(
+        reward=eta_reg_entropy + cs * regularized_reward,
+        reward_uncorrected=regularized_reward + cs * carry.reward_uncorrected,
+        next_value=gamma * carry.next_value,
+        next_v_target=gamma * carry.next_v_target,
+        importance_sampling=cs * carry.importance_sampling)
+    reset_carry = init_state_v_trace
+
+    # Invalid turn: init_state_v_trace and (zero target, learning_output)
+    # pyformat: disable
+    return _where(valid,  # pytype: disable=bad-return-type  # numpy-scalars
+                  _where((player_id == player),
+                         (our_carry, (our_v_target, our_learning_output)),
+                         (opp_carry, (opp_v_target, opp_learning_output))),
+                  (reset_carry, (reset_v_target, reset_learning_output)))
+      
+  
   def _loop_v_trace(carry: LoopVTraceCarry, x) -> Tuple[LoopVTraceCarry, Any]:
     (cs, player_id, v, reward, eta_reg_entropy, valid, inv_mu, actions_oh,
      eta_log_policy) = x
@@ -464,13 +704,21 @@ def v_trace(
     opp_v_target = jnp.zeros_like(our_v_target)
     reset_v_target = jnp.zeros_like(our_v_target)
 
-    # Learning output:
+    # a =  (carry.reward_uncorrected - carry.next_value)
+    # b = jnp.expand_dims(carry.importance_sampling, -1) * a
     our_learning_output = (
-        v +  # value
-        eta_log_policy +  # regularisation
-        actions_oh * jnp.expand_dims(inv_mu, axis=-1) *
-        (jnp.expand_dims(discounted_reward, axis=-1) + gamma * jnp.expand_dims(
-            carry.importance_sampling, axis=-1) * carry.next_v_target - v))
+      v + eta_log_policy
+      + actions_oh * jnp.expand_dims(inv_mu, axis=-1) * (jnp.expand_dims(reward, axis=-1) 
+                                                         - eta_log_policy 
+                                                         + gamma * jnp.expand_dims(carry.importance_sampling, axis=-1) * (jnp.expand_dims(carry.reward_uncorrected, -1) - carry.next_v_target) - v)
+    )
+    # Learning output:
+    # our_learning_output = (
+    #     v +  # value
+    #     eta_log_policy +  # regularisation
+    #     actions_oh * jnp.expand_dims(inv_mu, axis=-1) *
+    #     (jnp.expand_dims(discounted_reward, axis=-1) + gamma * jnp.expand_dims(
+    #         carry.importance_sampling, axis=-1) * carry.next_v_target - v))
 
     opp_learning_output = jnp.zeros_like(our_learning_output)
     reset_learning_output = jnp.zeros_like(our_learning_output)
@@ -500,7 +748,7 @@ def v_trace(
     # pyformat: enable
 
   _, (v_target, learning_output) = lax.scan(
-      f=_loop_v_trace,
+      f=_loop_v_trace2,
       init=init_state_v_trace,
       xs=(policy_ratio, player_id, v, reward, eta_reg_entropy, valid, inv_mu,
           actions_oh, eta_log_policy),
@@ -530,6 +778,28 @@ def get_loss_v(v_list: Sequence[chex.Array],
   return sum(loss_v_list)
 
 
+def get_loss_q(q_list: Sequence[chex.Array],
+               q_target_list: Sequence[chex.Array],
+               mask_list: Sequence[chex.Array],
+               actions_oh_list: Sequence[chex.Array]) -> chex.Array:
+  """Define the loss function for the critic."""
+  # chex.assert_trees_all_equal_shapes(q_list, q_target_list)
+  # v_list and v_target_list come with a degenerate trailing dimension,
+  # which mask_list tensors do not have.
+  chex.assert_shape(mask_list, q_list[0].shape[:-1])
+  loss_q_list = []
+  for (q_n, q_target, mask, actions_oh) in zip(q_list, q_target_list, mask_list, actions_oh_list):
+    assert q_n.shape[0] == q_target.shape[0]
+
+    loss_q = jnp.expand_dims(
+        mask, axis=-1) * actions_oh * (q_n - lax.stop_gradient(q_target))**2
+    normalization = jnp.sum(mask)
+    loss_q = jnp.sum(loss_q) / (normalization + (normalization == 0.0))
+
+    loss_q_list.append(loss_q)
+  return sum(loss_q_list)
+
+
 def apply_force_with_threshold(decision_outputs: chex.Array, force: chex.Array,
                                threshold: float,
                                threshold_center: chex.Array) -> chex.Array:
@@ -555,11 +825,11 @@ def get_loss_nerd(logit_list: Sequence[chex.Array],
                   policy_list: Sequence[chex.Array],
                   q_vr_list: Sequence[chex.Array],
                   valid: chex.Array,
-                  player_ids: Sequence[chex.Array],
+                  player_ids: chex.Array,
                   legal_actions: chex.Array,
                   importance_sampling_correction: Sequence[chex.Array],
                   clip: float = 100,
-                  threshold: float = 2) -> chex.Array:
+                  threshold: float = 2.) -> chex.Array:
   """Define the nerd loss."""
   assert isinstance(importance_sampling_correction, list)
   loss_pi_list = []
@@ -728,11 +998,24 @@ class RNaDNetwork(nn.Module):
       x = nn.relu(x)
     logit = nn.Dense(self.out_dims)(x)       # shape inference
     v = nn.Dense(1)(x)
-
+    q = nn.Dense(self.out_dims)(x)
     pi = _legal_policy(logit, env_step.legal)
     log_pi = legal_log_policy(logit, env_step.legal)
-    return pi, v, log_pi, logit
+    return pi, v, q, log_pi, logit
 
+# For state returns value for each action
+# class QNetwork(nn.Module):
+#   out_dims: int
+#   network_layers: Sequence[int]
+  
+#   @nn.compact
+#   def __call__(self, env_step):
+#     x = env_step.obs
+#     for size in self.network_layers:
+#       x = nn.Dense(size)(x)
+#       x = nn.relu(x)
+#     q = nn.Dense(self.out_dims)(x)
+#     return q
 
 class RNaDSolver(policy_lib.Policy):
   """Implements a solver for the R-NaD Algorithm.
@@ -806,13 +1089,13 @@ class RNaDSolver(policy_lib.Policy):
            params_prev_: Params, ts: TimeStep, alpha: float,
            learner_steps: int) -> float:
     rollout = jax.vmap(self.network.apply, (None, 0), 0)
-    pi, v, log_pi, logit = rollout(params, ts.env)
+    pi, v, q, log_pi, logit = rollout(params, ts.env)
 
     policy_pprocessed = self.config.finetune(pi, ts.env.legal, learner_steps)
 
-    _, v_target, _, _ = rollout(params_target, ts.env)
-    _, _, log_pi_prev, _ = rollout(params_prev, ts.env)
-    _, _, log_pi_prev_, _ = rollout(params_prev_, ts.env)
+    _, v_target, q_target, _, _ = rollout(params_target, ts.env)
+    _, _, _, log_pi_prev, _ = rollout(params_prev, ts.env)
+    _, _, _, log_pi_prev_, _ = rollout(params_prev_, ts.env)
     # This line creates the reward transform log(pi(a|x)/pi_reg(a|x)).
     # For the stability reasons, reward changes smoothly between iterations.
     # The mixing between old and new reward transform is a convex combination
@@ -820,10 +1103,12 @@ class RNaDSolver(policy_lib.Policy):
     log_policy_reg = log_pi - (alpha * log_pi_prev + (1 - alpha) * log_pi_prev_)
 
     v_target_list, has_played_list, v_trace_policy_target_list = [], [], []
+    q_target_list = []
     for player in range(self._game.num_players()):
       reward = ts.actor.rewards[:, :, player]  # [T, B, Player]
-      v_target_, has_played, policy_target_ = v_trace(
+      v_target_, q_target_, has_played, policy_target_ = v_trace_my(
           v_target,
+          q_target,
           ts.env.valid,
           ts.env.player_id,
           ts.actor.policy,
@@ -838,11 +1123,13 @@ class RNaDSolver(policy_lib.Policy):
           rho=self.config.rho_vtrace,
           eta=self.config.eta_reward_transform)
       v_target_list.append(v_target_)
+      q_target_list.append(q_target_)
       has_played_list.append(has_played)
       v_trace_policy_target_list.append(policy_target_)
     loss_v = get_loss_v([v] * self._game.num_players(), v_target_list,
                         has_played_list)
-
+    loss_q = get_loss_q([q] * self._game.num_players(), q_target_list,
+                        has_played_list, [ts.actor.action_oh] * self._game.num_players())
   
     is_vector = jnp.expand_dims(jnp.ones_like(ts.env.valid), axis=-1)
     importance_sampling_correction = [is_vector] * self._game.num_players()
@@ -858,7 +1145,7 @@ class RNaDSolver(policy_lib.Policy):
         importance_sampling_correction,
         clip=self.config.nerd.clip,
         threshold=self.config.nerd.beta)
-    return loss_v + loss_nerd  # pytype: disable=bad-return-type  # numpy-scalars
+    return loss_v + loss_q + loss_nerd  # pytype: disable=bad-return-type  # numpy-scalars
 
   @functools.partial(jax.jit, static_argnums=(0,))
   def update_parameters(
@@ -1024,13 +1311,13 @@ class RNaDSolver(policy_lib.Policy):
   @functools.partial(jax.jit, static_argnums=(0,))
   def _network_jit_apply_and_post_process(
       self, params: Params, env_step: EnvStep) -> chex.Array:
-    pi, _, _, _ = self.network.apply(params, env_step)
+    pi, _, _, _, _ = self.network.apply(params, env_step)
     pi = self.config.finetune.post_process_policy(pi, env_step.legal)
     return pi
 
   @functools.partial(jax.jit, static_argnums=(0, 1))
   def _network_jit_apply(self, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
-    pi, _, _, _ = self.network.apply(params, env_step)
+    pi, _, _, _, _ = self.network.apply(params, env_step)
     
     pi = ((1 - self.config.epsilon) * pi + self.config.epsilon / jnp.sum(env_step.legal, axis=-1, keepdims=True)) * env_step.legal
     
