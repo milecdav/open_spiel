@@ -39,18 +39,18 @@ def compute_exploitability(solver):
 
 def main():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  cards = 5
+  cards = 4
   trajectory_max = (cards - 1) * 2
   game = "goofspiel"
   game_params = {"num_cards": cards, "points_order": "descending", "imp_info": True}
   game_params = [(k, v) for k, v in game_params.items()]
   
   
-  # game = "leduc_poker"
-  # game_params = []
-  # trajectory_max = 8
+  game = "leduc_poker"
+  game_params = []
+  trajectory_max = 8
   
-  schedule_step = 5000
+  schedule_step = 4000
   config = rnad.RNaDConfig(game_name = game, game_params=game_params, 
                            batch_size=32, 
                            entropy_schedule_repeats = (20, 1 ), 
@@ -60,6 +60,7 @@ def main():
                            trajectory_max = trajectory_max,
                            clip_gradient= 10000.0,
                            epsilon=args.epsilon,
+                           policy_network_layers=(256, 256),
                            nerd=rnad.NerdConfig(beta=2.0, clip=100.0)
   )
   solver = rnad.RNaDSolver(config)
@@ -68,13 +69,32 @@ def main():
     compute_exploitability(solver)
     for j in range(schedule_step):
       solver.step()
+    
   for i in range(200):
     compute_exploitability(solver)
     for j in range(schedule_step * 4):
       solver.step()
-  # with open("mu_zero_test.pkl", "wb") as f:
-  #   pickle.dump(solver, f)
+  with open("q_learned.pkl", "wb") as f:
+    pickle.dump(solver, f)
 
-
+def test():
+  from open_spiel.python.algorithms import sequence_form_lp
+  with open("q_learned.pkl", "rb") as f:
+    solver = pickle.load(f)
+  state = solver._game.new_initial_state()
+  state.apply_action(3)
+  state.apply_action(2)
+  
+  states = [solver._state_as_env_step(state)]
+  pi, v, q, _, _ = solver.network.apply(solver.params_target, solver._state_as_env_step(state))
+  print(pi)
+  print(q)
+  print(v)
+  
+  # val1, val2, pi1, pi2 = sequence_form_lp.solve_zero_sum_game(solver._game)
+  # aps = pi1.action_probabilities(state)
+  # print(aps)
+  
 if __name__ == "__main__":
   main()
+  # test()
