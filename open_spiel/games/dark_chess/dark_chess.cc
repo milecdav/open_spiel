@@ -51,7 +51,7 @@ std::shared_ptr<const Game> Factory(const GameParameters& params) {
   return std::shared_ptr<const Game>(new DarkChessGame(params));
 }
 
-REGISTER_SPIEL_GAME(kGameType, Factory)
+REGISTER_SPIEL_GAME(kGameType, Factory);
 
 chess::ObservationTable ComputePrivateInfoTable(
     const chess::ChessBoard& board, chess::Color color,
@@ -256,6 +256,33 @@ bool ObserverHasString(IIGObservationType iig_obs_type) {
 }
 bool ObserverHasTensor(IIGObservationType iig_obs_type) {
   return !iig_obs_type.perfect_recall;
+}
+
+void AddPieceTypePlane(chess::Color color, chess::PieceType piece_type,
+                       const chess::ChessBoard& board,
+                       absl::Span<float>::iterator& value_it) {
+  for (int8_t y = 0; y < chess::kMaxBoardSize; ++y) {
+    for (int8_t x = 0; x < chess::kMaxBoardSize; ++x) {
+      chess::Piece piece_on_board = board.at(chess::Square{x, y});
+      *value_it++ =
+          (piece_on_board.color == color && piece_on_board.type == piece_type
+               ? 1.0
+               : 0.0);
+    }
+  }
+}
+
+// Adds a uniform scalar plane scaled with min and max.
+template <typename T>
+void AddScalarPlane(T val, T min, T max,
+                    absl::Span<float>::iterator& value_it) {
+  double normalized_val = static_cast<double>(val - min) / (max - min);
+  for (int i = 0; i < chess::k2dMaxBoardSize; ++i) *value_it++ = normalized_val;
+}
+
+// Adds a binary scalar plane.
+void AddBinaryPlane(bool val, absl::Span<float>::iterator& value_it) {
+  AddScalarPlane<int>(val ? 1 : 0, 0, 1, value_it);
 }
 
 }  // namespace
@@ -506,6 +533,50 @@ void DarkChessState::ObservationTensor(Player player,
   const auto& game = open_spiel::down_cast<const DarkChessGame&>(*game_);
   game.default_observer_->WriteTensor(*this, player, &allocator);
 }
+
+
+void DarkChessState::StateTensor(absl::Span<float> values) const {
+  auto value_it = values.begin();
+
+  // Piece configuration.
+  for (const auto& piece_type : chess::kPieceTypes) {
+    AddPieceTypePlane(chess::Color::kWhite, piece_type, Board(), value_it);
+    AddPieceTypePlane(chess::Color::kBlack, piece_type, Board(), value_it);
+  }
+
+  AddPieceTypePlane(chess::Color::kEmpty, chess::PieceType::kEmpty, Board(), value_it);
+
+  const auto entry = repetitions_.find(Board().HashValue());
+  SPIEL_CHECK_FALSE(entry == repetitions_.end());
+  int repetitions = entry->second;
+
+  // Num repetitions for the current board.
+  AddScalarPlane(repetitions, 1, 3, value_it);
+
+  // Side to play.
+  AddScalarPlane(ColorToPlayer(Board().ToPlay()), 0, 1, value_it);
+
+  // Irreversible move counter.
+  AddScalarPlane(Board().IrreversibleMoveCounter(), 0, 101, value_it);
+
+  // Castling rights.
+  AddBinaryPlane(Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft),
+                 value_it);
+
+  AddBinaryPlane(
+      Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight),
+      value_it);
+
+  AddBinaryPlane(Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft),
+                 value_it);
+
+  AddBinaryPlane(
+      Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight),
+      value_it);
+
+  SPIEL_CHECK_EQ(value_it, values.end());
+}
+
 
 std::unique_ptr<State> DarkChessState::Clone() const {
   return std::make_unique<DarkChessState>(*this);

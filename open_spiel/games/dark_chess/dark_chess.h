@@ -83,6 +83,8 @@ class DarkChessState : public State {
   std::string ObservationString(Player player) const override;
   void ObservationTensor(Player player,
                          absl::Span<float> values) const override;
+
+  void StateTensor(absl::Span<float> values) const override;
   std::unique_ptr<State> Clone() const override;
   void UndoAction(Player player, Action action) override;
 
@@ -169,6 +171,14 @@ class DarkChessGame : public Game {
     };
     return shape;
   }
+
+  std::vector<int> StateTensorShape() const override {
+    return {
+      (13 /* piece types * colours + empty */ + 1 /* repetition count */ +
+          1 /* side to move */ + 1 /* irreversible move counter */ +
+          4 /* castling rights */) * chess::kMaxBoardSize * chess::kMaxBoardSize}; // Taken from chess.h
+  }
+
   int MaxGameLength() const override { return chess::MaxGameLength(); }
   std::shared_ptr<Observer> MakeObserver(
       absl::optional<IIGObservationType> iig_obs_type,

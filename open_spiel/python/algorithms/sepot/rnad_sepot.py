@@ -1308,6 +1308,11 @@ class RNaDSolver(policy_lib.Policy):
     """
     self._rngkey, subkey = jax.random.split(self._rngkey)
     return subkey
+  
+  def _next_rng_keys(self, keys) -> list[chex.PRNGKey]:
+    self._rngkey, *subkeys = jax.random.split(self._rngkey, keys + 1)
+    return subkeys
+
 
   def _state_as_env_step(self, state: pyspiel.State) -> EnvStep:
     # A terminal state must be communicated to players, however since
@@ -1391,6 +1396,32 @@ class RNaDSolver(policy_lib.Policy):
     pi, _, _, _ = self.network.apply(params, env_step)
     return pi
 
+  @functools.partial(jax.jit, static_argnums=(0, 1))
+  def _network_jit_apply_sample(self, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
+    pi, _, _, _ = self.network.apply(params, env_step)
+    
+    # We do not do epsilon greedy
+    # pi = ((1 - self.config.epsilon) * pi + self.config.epsilon / jnp.sum(env_step.legal, axis=-1, keepdims=True)) * env_step.legal
+    
+    def choice_wrapper(key, probs, amount_actions):
+      return jax.random.choice(key, amount_actions, p=probs)
+    
+    vectorized_choice = jax.vmap(choice_wrapper, (0, 0, None), 0)
+    action = vectorized_choice(rngkeys, pi, distinct_actions)
+    action_oh = jax.nn.one_hot(action, distinct_actions)
+    return pi, action, action_oh
+  
+  def actor_step_jitted(self, env_step: EnvStep):
+    keys = self._next_rng_keys(self.config.batch_size)
+    keys = np.asarray(keys)
+    pi, action, action_oh = self._network_jit_apply_sample(self._game.num_distinct_actions(), self.params, env_step, keys)
+    pi = np.asarray(pi, dtype=np.float32)
+    action = np.asarray(action, dtype=np.int32)
+    action_oh = np.asarray(action_oh, dtype=np.float32)
+
+    actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
+
+    return action, actor_step
   def actor_step(self, env_step: EnvStep):
     pi = self._network_jit_apply(self.params, env_step)
     pi = np.asarray(pi).astype("float64")
@@ -1417,9 +1448,12 @@ class RNaDSolver(policy_lib.Policy):
     env_step = self._batch_of_states_as_env_step(states)
     for _ in range(self.config.trajectory_max):
       prev_env_step = env_step
-      a, actor_step = self.actor_step(env_step)
-
-      states = self._batch_of_states_apply_action(states, a)
+      a, actor_step = self.actor_step_jitted(env_step)
+      
+      succseful, states = self._batch_of_states_apply_action(states, a)
+      if not succseful:
+        break
+      
       env_step = self._batch_of_states_as_env_step(states)
       timesteps.append(
           TimeStep(
@@ -1429,6 +1463,9 @@ class RNaDSolver(policy_lib.Policy):
                   policy=actor_step.policy,
                   rewards=env_step.rewards),
           ))
+    if not succseful:
+      print("Redoing batch: ", self.learner_steps, flush=True)
+      return self.collect_batch_trajectory()
     # Concatenate all the timesteps together to form a single rollout [T, B, ..]
     return jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps)
 
@@ -1443,10 +1480,12 @@ class RNaDSolver(policy_lib.Policy):
     """Apply a batch of `actions` to a parallel list of `states`."""
     for state, action in zip(states, list(actions)):
       if not state.is_terminal():
+        if action not in state.legal_actions():
+          return False, states
         self.actor_steps += 1
         state.apply_action(action)
         self._play_chance(state)
-    return states
+    return True, states
 
   def _play_chance(self, state: pyspiel.State) -> pyspiel.State:
     """Plays the chance nodes until we end up at another type of node.
