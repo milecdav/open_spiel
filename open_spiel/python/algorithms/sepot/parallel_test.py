@@ -1,6 +1,7 @@
 from open_spiel.python.algorithms.sepot import rnad_sepot_parallel as rnad
 
 import numpy as np
+import jax
 
 from multiprocessing.managers import BaseManager
 import multiprocessing as mp
@@ -126,7 +127,7 @@ def goofspiel_parallel():
         ("imp_info", True),
         ("points_order", "descending")
   )
-  test_iters = 5000
+  test_iters = 20000
   max_trajectory = (5 - 1) * 2 
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
@@ -149,7 +150,7 @@ def goofspiel_parallel():
       seed= 4444
   )
   solver = rnad.RNaDSolver(rnad_config)
-  
+  print(jax.devices('cpu'))
   
   start = time.time()
   solver.parallel_steps(test_iters)
