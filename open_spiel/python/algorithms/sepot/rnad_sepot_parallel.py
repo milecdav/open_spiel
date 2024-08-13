@@ -1327,12 +1327,12 @@ class RNaDSolver(policy_lib.Policy):
     
     manager.start()
     queue = mp.Queue()
+    devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
-    params_wrapper.set(self.params)
+    params_wrapper.set(jax.device_put(self.params, devices[0]))
     rng_keys = self._next_rng_keys(num_threads)
     np_keys = [np.random.RandomState(self._np_rng.randint(0, 2**32)) for _ in range(num_threads)]
     
-    devices = jax.devices('cpu')
     processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key, jax.jit(fun=_network_jit_sample, static_argnums=(0, 1), device = devices[i % len(devices)]))) for i, (rng_key, np_key) in enumerate(zip(rng_keys, np_keys))]
     # processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key, functools.partial(jax.jit, fun=_network_jit_sample, static_argnums=(0, 1), device = devices[i % len(devices)]))) for i, (rng_key, np_key) in enumerate(zip(rng_keys, np_keys))]
     # print("Created")
@@ -1355,7 +1355,7 @@ class RNaDSolver(policy_lib.Policy):
           self.optimizer, self.optimizer_target, timestep, alpha,
           self.learner_steps, update_target_net)
       
-      params_wrapper.set(self.params)
+      params_wrapper.set(jax.device_put(self.params,  jax.devices('cpu')[0]))
 
       policy_after_train = self._network_jit_apply(self.params, timestep.env)
       
