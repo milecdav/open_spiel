@@ -151,15 +151,18 @@ def goofspiel_parallel():
   )
   solver = rnad.RNaDSolver(rnad_config)
   print(jax.devices('cpu'))
+  print(jax.devices('gpu'))
   
-  start = time.time()
-  solver.parallel_steps(test_iters)
-  print(time.time() - start)
   
   start = time.time()
   for i in range(test_iters):
     solver.step()
   print(time.time() - start)
     
+  
+  start = time.time()
+  solver.parallel_steps(test_iters)
+  print(time.time() - start)
+  
 if __name__ == "__main__":
   goofspiel_parallel()
