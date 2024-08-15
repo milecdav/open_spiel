@@ -1593,7 +1593,7 @@ class RNaDSolver(policy_lib.Policy):
     return (1 + self.config.num_transformations) ** 2 if self.config.matrix_valued_states else 1 + self.config.num_transformations * 2
   
 
-@functools.partial(jax.jit, static_argnums=(0, 1), device = jax.devices('cpu')[0])
+@functools.partial(jax.jit, static_argnums=(0, 1))
 def _network_jit_sample(network, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
   
   pi, _, _, _ = network.apply(params, env_step)
