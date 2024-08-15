@@ -1321,6 +1321,7 @@ class RNaDSolver(policy_lib.Policy):
     return logs
   
   def parallel_steps(self, num_steps: int):
+    mp.set_start_method('spawn', force=True)
     num_threads = 8
     BaseManager.register('ParallelWrapper', ParallelWrapper)
     manager = BaseManager()
@@ -1329,12 +1330,13 @@ class RNaDSolver(policy_lib.Policy):
     queue = mp.Queue()
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
-    with jax.default_device(jax.devices("cpu")[0]):
-      params_wrapper.set(self.params)
+    # params_cpu = jax.device_put(self.params, jax.devices("cpu")[0])["params"]
+    params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
+    params_wrapper.set(params_cpu)
     rng_keys = self._next_rng_keys(num_threads)
     np_keys = [np.random.RandomState(self._np_rng.randint(0, 2**32)) for _ in range(num_threads)]
     
-    processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key, jax.jit(fun=_network_jit_sample, static_argnums=(0, 1), device = devices[i % len(devices)]))) for i, (rng_key, np_key) in enumerate(zip(rng_keys, np_keys))]
+    processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key)) for rng_key, np_key in zip(rng_keys, np_keys)]
     # processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key, functools.partial(jax.jit, fun=_network_jit_sample, static_argnums=(0, 1), device = devices[i % len(devices)]))) for i, (rng_key, np_key) in enumerate(zip(rng_keys, np_keys))]
     # print("Created")
     for p in processes:
@@ -1356,7 +1358,8 @@ class RNaDSolver(policy_lib.Policy):
           self.optimizer, self.optimizer_target, timestep, alpha,
           self.learner_steps, update_target_net)
       
-      params_wrapper.set(jax.device_put(self.params,  jax.devices('cpu')[0]))
+      params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
+      params_wrapper.set(params_cpu)
 
       policy_after_train = self._network_jit_apply(self.params, timestep.env)
       
@@ -1590,7 +1593,7 @@ class RNaDSolver(policy_lib.Policy):
     return (1 + self.config.num_transformations) ** 2 if self.config.matrix_valued_states else 1 + self.config.num_transformations * 2
   
 
-# @functools.partial(jax.jit, static_argnums=(0, 1))
+@functools.partial(jax.jit, static_argnums=(0, 1), device = jax.devices('cpu')[0])
 def _network_jit_sample(network, distinct_actions: int, params: Params, env_step: EnvStep, rngkeys: chex.Array) -> chex.Array:
   
   pi, _, _, _ = network.apply(params, env_step)
@@ -1613,6 +1616,20 @@ def next_rng_keys(rngkey, keys) -> list[chex.PRNGKey]:
   return subkeys
 
 import time
+
+def actor_step_func(network, params, rng_key, distinct_actions, env_step: EnvStep):
+  
+  # keys = jax.random.split(rng_key, batch_size)
+  
+  pi, action, action_oh = _network_jit_sample(network, distinct_actions, params, env_step, rng_key)
+  pi = np.asarray(pi, dtype=np.float32)
+  action = np.asarray(action, dtype=np.int32)
+  action_oh = np.asarray(action_oh, dtype=np.float32)
+
+  actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
+
+  return action, actor_step
+
 
 def actor_step_jitted(network, jitted_call, params, rng_key, distinct_actions, env_step: EnvStep):
   
@@ -1692,7 +1709,7 @@ def batch_of_states_apply_action(
       play_chance(state, np_rng)
   return True, states 
   
-def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng, jitted_call):
+def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
   
   game_params = {}
   for n, p in config.game_params:
@@ -1729,7 +1746,7 @@ def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng, jitted_
         rngs.append(actor_step_rng)
       rngs = np.asarray(rngs)
       
-      a, actor_step = actor_step_jitted(network, jitted_call, params_wrapper.get(), rngs, distinct_actions, env_step)
+      a, actor_step = actor_step_func(network, params_wrapper.get(), rngs, distinct_actions, env_step)
       succseful, states = batch_of_states_apply_action(states, a, np_rng)
       if not succseful:
         break
