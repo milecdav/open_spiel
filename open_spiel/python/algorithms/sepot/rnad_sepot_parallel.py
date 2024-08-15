@@ -1358,8 +1358,9 @@ class RNaDSolver(policy_lib.Policy):
           self.optimizer, self.optimizer_target, timestep, alpha,
           self.learner_steps, update_target_net)
       
-      params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
-      params_wrapper.set(params_cpu)
+      if step % 20 == 0:
+        params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
+        params_wrapper.set(params_cpu)
 
       policy_after_train = self._network_jit_apply(self.params, timestep.env)
       
