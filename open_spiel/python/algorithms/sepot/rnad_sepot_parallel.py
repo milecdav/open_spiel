@@ -1617,11 +1617,12 @@ def next_rng_keys(rngkey, keys) -> list[chex.PRNGKey]:
 
 import time
 
-def actor_step_func(network, params, rng_key, distinct_actions, env_step: EnvStep):
+def actor_step_func(network, params, rng_key, distinct_actions, batch_size, env_step: EnvStep):
   
-  # keys = jax.random.split(rng_key, batch_size)
+  with jax.default_device(jax.devices("cpu")[0]):
+    keys = jax.random.split(rng_key, batch_size)
   
-  pi, action, action_oh = _network_jit_sample(network, distinct_actions, params, env_step, rng_key)
+  pi, action, action_oh = _network_jit_sample(network, distinct_actions, params, env_step, keys)
   pi = np.asarray(pi, dtype=np.float32)
   action = np.asarray(action, dtype=np.int32)
   action_oh = np.asarray(action_oh, dtype=np.float32)
@@ -1739,14 +1740,14 @@ def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
     for _ in range(config.trajectory_max):
       
       prev_env_step = env_step
-      rngs = []
-      # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
-      for i in range(config.batch_size):
-        rng_key, actor_step_rng = jax.random.split(rng_key)
-        rngs.append(actor_step_rng)
-      rngs = np.asarray(rngs)
+      # rngs = []
+      # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
+      # for i in range(config.batch_size):
+      #   rng_key, actor_step_rng = jax.random.split(rng_key)
+      #   rngs.append(actor_step_rng)
+      # rngs = np.asarray(rngs)
       
-      a, actor_step = actor_step_func(network, params_wrapper.get(), rngs, distinct_actions, env_step)
+      a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
       succseful, states = batch_of_states_apply_action(states, a, np_rng)
       if not succseful:
         break
