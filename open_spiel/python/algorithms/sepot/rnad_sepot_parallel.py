@@ -1329,7 +1329,8 @@ class RNaDSolver(policy_lib.Policy):
     queue = mp.Queue()
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
-    params_wrapper.set(jax.device_put(self.params, devices[0]))
+    with jax.default_device(jax.devices("cpu")[0]):
+      params_wrapper.set(self.params)
     rng_keys = self._next_rng_keys(num_threads)
     np_keys = [np.random.RandomState(self._np_rng.randint(0, 2**32)) for _ in range(num_threads)]
     

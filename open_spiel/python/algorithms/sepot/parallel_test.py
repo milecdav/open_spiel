@@ -127,7 +127,7 @@ def goofspiel_parallel():
         ("imp_info", True),
         ("points_order", "descending")
   )
-  test_iters = 20000
+  test_iters = 50
   max_trajectory = (5 - 1) * 2 
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
@@ -151,7 +151,12 @@ def goofspiel_parallel():
   )
   solver = rnad.RNaDSolver(rnad_config)
   print(jax.devices('cpu'))
-  print(jax.devices('gpu'))
+  # print(jax.devices('gpu'))
+  
+  
+  start = time.time()
+  solver.parallel_steps(test_iters)
+  print(time.time() - start)
   
   
   start = time.time()
@@ -159,10 +164,5 @@ def goofspiel_parallel():
     solver.step()
   print(time.time() - start)
     
-  
-  start = time.time()
-  solver.parallel_steps(test_iters)
-  print(time.time() - start)
-  
 if __name__ == "__main__":
   goofspiel_parallel()
