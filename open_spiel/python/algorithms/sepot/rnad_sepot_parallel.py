@@ -1619,8 +1619,8 @@ import time
 
 def actor_step_func(network, params, rng_key, distinct_actions, batch_size, env_step: EnvStep):
   
-  with jax.default_device(jax.devices("cpu")[0]):
-    keys = jax.random.split(rng_key, batch_size)
+  # with jax.default_device(jax.devices("cpu")[0]):
+  keys = jax.random.split(rng_key, batch_size)
   
   pi, action, action_oh = _network_jit_sample(network, distinct_actions, params, env_step, keys)
   pi = np.asarray(pi, dtype=np.float32)
@@ -1711,59 +1711,59 @@ def batch_of_states_apply_action(
   return True, states 
   
 def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
-  
-  game_params = {}
-  for n, p in config.game_params:
-    game_params[n] = p
-  game = pyspiel.load_game(config.game_name, game_params)
-  if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
-    game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
-  distinct_actions = game.num_distinct_actions()
-  
-  ex_state = play_chance(game.new_initial_state(), np_rng)
-  network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
-  # print("Initalized thread")
-  while True:
-    if not params_wrapper.is_sampling():
-      # print("Stopped sampling", flush=True)
-      break
-    if queue.qsize() > 20:
-      time.sleep(1)
-      continue
-    states = [
-        play_chance(game.new_initial_state(), np_rng)
-        for _ in range(config.batch_size)
-    ]
-    timesteps = []
+  with jax.default_device(jax.devices("cpu")[0]):
+    game_params = {}
+    for n, p in config.game_params:
+      game_params[n] = p
+    game = pyspiel.load_game(config.game_name, game_params)
+    if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
+      game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
+    distinct_actions = game.num_distinct_actions()
     
-    env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-    for _ in range(config.trajectory_max):
-      
-      prev_env_step = env_step
-      # rngs = []
-      # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
-      # for i in range(config.batch_size):
-      #   rng_key, actor_step_rng = jax.random.split(rng_key)
-      #   rngs.append(actor_step_rng)
-      # rngs = np.asarray(rngs)
-      
-      a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
-      succseful, states = batch_of_states_apply_action(states, a, np_rng)
-      if not succseful:
+    ex_state = play_chance(game.new_initial_state(), np_rng)
+    network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
+    # print("Initalized thread")
+    while True:
+      if not params_wrapper.is_sampling():
+        # print("Stopped sampling", flush=True)
         break
+      if queue.qsize() > 20:
+        time.sleep(1)
+        continue
+      states = [
+          play_chance(game.new_initial_state(), np_rng)
+          for _ in range(config.batch_size)
+      ]
+      timesteps = []
+      
       env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-      timesteps.append(
-          TimeStep(
-              env=prev_env_step,
-              actor=ActorStep(
-                  action_oh=actor_step.action_oh,
-                  policy=actor_step.policy,
-                  rewards=env_step.rewards),
-          ))
-    if not succseful:
-      print("Redoing batch", flush=True)
-      continue
+      for _ in range(config.trajectory_max):
+        
+        prev_env_step = env_step
+        # rngs = []
+        # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
+        # for i in range(config.batch_size):
+        #   rng_key, actor_step_rng = jax.random.split(rng_key)
+        #   rngs.append(actor_step_rng)
+        # rngs = np.asarray(rngs)
+        
+        a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
+        succseful, states = batch_of_states_apply_action(states, a, np_rng)
+        if not succseful:
+          break
+        env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
+        timesteps.append(
+            TimeStep(
+                env=prev_env_step,
+                actor=ActorStep(
+                    action_oh=actor_step.action_oh,
+                    policy=actor_step.policy,
+                    rewards=env_step.rewards),
+            ))
+      if not succseful:
+        print("Redoing batch", flush=True)
+        continue
+        
       
-    
-      
-    queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))
+        
+      queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))
