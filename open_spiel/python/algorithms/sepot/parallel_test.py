@@ -2,6 +2,7 @@ from open_spiel.python.algorithms.sepot import rnad_sepot_parallel as rnad
 
 import numpy as np
 import jax
+import os
 
 from multiprocessing.managers import BaseManager
 import multiprocessing as mp
@@ -121,6 +122,7 @@ def basic_parallel():
 import time    
     
 def goofspiel_parallel():
+  os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
   game_name = "goofspiel"
   game_params = (
         ("num_cards", 5),
@@ -166,6 +168,7 @@ def goofspiel_parallel():
     
     
 def dark_chess_parallel():
+  os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
   game_name = "dark_chess"
   game_params = tuple()
   test_iters = 2000
