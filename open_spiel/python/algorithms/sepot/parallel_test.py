@@ -127,7 +127,7 @@ def goofspiel_parallel():
         ("imp_info", True),
         ("points_order", "descending")
   )
-  test_iters = 50
+  test_iters = 2000
   max_trajectory = (5 - 1) * 2 
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
@@ -164,5 +164,49 @@ def goofspiel_parallel():
     solver.step()
   print(time.time() - start)
     
+    
+def dark_chess_parallel():
+  game_name = "dark_chess"
+  game_params = tuple()
+  test_iters = 2000
+  max_trajectory = 100
+  rnad_config = rnad.RNaDConfig(
+      game_name = game_name, 
+      game_params = game_params,
+      trajectory_max =  max_trajectory,
+      policy_network_layers = [1024, 1024],
+      mvs_network_layers = [1024, 1024],
+      transformation_network_layers = [1024, 1024],
+      
+      batch_size = 64,
+      learning_rate = 3e-4,
+      entropy_schedule_repeats = [100, 1],
+      entropy_schedule_size = [500, 2000],
+      c_vtrace = 1.0,
+      rho_vtrace = 1.0,
+      eta_reward_transform = 0.2,
+
+      num_transformations = 10,
+      matrix_valued_states = True,
+      seed= 4444,
+      state_representation=rnad.StateRepresentation.OBSERVATION
+  )
+  solver = rnad.RNaDSolver(rnad_config)
+  print(jax.devices('cpu'))
+  # print(jax.devices('gpu'))
+  
+  
+  start = time.time()
+  solver.parallel_steps(test_iters)
+  print(time.time() - start)
+  
+  
+  start = time.time()
+  for i in range(test_iters):
+    solver.step()
+  print(time.time() - start)
+    
+    
+    
 if __name__ == "__main__":
-  goofspiel_parallel()
+  dark_chess_parallel()
