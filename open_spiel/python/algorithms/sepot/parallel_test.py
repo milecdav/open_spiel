@@ -207,17 +207,29 @@ def dark_chess_parallel():
   solver = rnad.RNaDSolver(rnad_config)
   print(jax.devices('cpu'))
   # print(jax.devices('gpu'))
+  print(mp.cpu_count(), flush=True)
+  # print(jax.devices('gpu'))
   
   
-  start = time.time()
+  
+  profiler = Profiler()
+  profiler.start()
+  
   solver.parallel_steps(test_iters)
-  print(time.time() - start)
+  
+  profiler.stop()
+  print(profiler.output_text(unicode=False, color=False), flush=True)
   
   
-  start = time.time()
+  
+  profiler = Profiler()
+  profiler.start()
+  
   for i in range(test_iters):
     solver.step()
-  print(time.time() - start)
+    
+  profiler.stop()
+  print(profiler.output_text(unicode=False, color=False))
     
     
     
