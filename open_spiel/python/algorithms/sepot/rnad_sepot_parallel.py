@@ -17,6 +17,7 @@ import enum
 import functools
 from typing import Any, Callable, Sequence, Tuple
 
+import os
 import chex
 import flax.linen as nn
 
@@ -33,7 +34,40 @@ import pyspiel
 import multiprocessing as mp
 from multiprocessing.managers import BaseManager
 
+import contextlib
 
+
+@contextlib.contextmanager
+def modified_environ(*remove, **update):
+    """
+    Temporarily updates the ``os.environ`` dictionary in-place.
+
+    The ``os.environ`` dictionary is updated in-place so that the modification
+    is sure to work in all situations.
+
+    :param remove: Environment variables to remove.
+    :param update: Dictionary of environment variables and values to add/update.
+    """
+    env = os.environ
+    update = update or {}
+    remove = remove or []
+
+    # List of environment variables being updated or removed.
+    stomped = (set(update.keys()) | set(remove)) & set(env.keys())
+    # Environment variables and values to restore on exit.
+    update_after = {k: env[k] for k in stomped}
+    # Environment variables and values to remove on exit.
+    remove_after = frozenset(k for k in update if k not in env)
+
+    try:
+        env.update(update)
+        [env.pop(k, None) for k in remove]
+        yield
+    finally:
+        env.update(update_after)
+        [env.pop(k) for k in remove_after]
+        
+        
 class ParallelWrapper():
   def __init__(self):
     self.params = {}
@@ -1712,59 +1746,60 @@ def batch_of_states_apply_action(
   return True, states 
   
 def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
-  with jax.default_device(jax.devices("cpu")[0]):
-    game_params = {}
-    for n, p in config.game_params:
-      game_params[n] = p
-    game = pyspiel.load_game(config.game_name, game_params)
-    if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
-      game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
-    distinct_actions = game.num_distinct_actions()
-    
-    ex_state = play_chance(game.new_initial_state(), np_rng)
-    network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
-    # print("Initalized thread")
-    while True:
-      if not params_wrapper.is_sampling():
-        # print("Stopped sampling", flush=True)
-        break
-      if queue.qsize() > 20:
-        time.sleep(1)
-        continue
-      states = [
-          play_chance(game.new_initial_state(), np_rng)
-          for _ in range(config.batch_size)
-      ]
-      timesteps = []
+  with modified_environ(XLA_PYTHON_CLIENT_PREALLOCATE='false'):
+    with jax.default_device(jax.devices("cpu")[0]):
+      game_params = {}
+      for n, p in config.game_params:
+        game_params[n] = p
+      game = pyspiel.load_game(config.game_name, game_params)
+      if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
+        game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
+      distinct_actions = game.num_distinct_actions()
       
-      env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-      for _ in range(config.trajectory_max):
-        
-        prev_env_step = env_step
-        # rngs = []
-        # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
-        # for i in range(config.batch_size):
-        #   rng_key, actor_step_rng = jax.random.split(rng_key)
-        #   rngs.append(actor_step_rng)
-        # rngs = np.asarray(rngs)
-        
-        a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
-        succseful, states = batch_of_states_apply_action(states, a, np_rng)
-        if not succseful:
+      ex_state = play_chance(game.new_initial_state(), np_rng)
+      network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
+      # print("Initalized thread")
+      while True:
+        if not params_wrapper.is_sampling():
+          # print("Stopped sampling", flush=True)
           break
+        if queue.qsize() > 60:
+          time.sleep(0.02)
+          continue
+        states = [
+            play_chance(game.new_initial_state(), np_rng)
+            for _ in range(config.batch_size)
+        ]
+        timesteps = []
+        
         env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-        timesteps.append(
-            TimeStep(
-                env=prev_env_step,
-                actor=ActorStep(
-                    action_oh=actor_step.action_oh,
-                    policy=actor_step.policy,
-                    rewards=env_step.rewards),
-            ))
-      if not succseful:
-        print("Redoing batch", flush=True)
-        continue
+        for _ in range(config.trajectory_max):
+          
+          prev_env_step = env_step
+          # rngs = []
+          # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
+          # for i in range(config.batch_size):
+          #   rng_key, actor_step_rng = jax.random.split(rng_key)
+          #   rngs.append(actor_step_rng)
+          # rngs = np.asarray(rngs)
+          
+          a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
+          succseful, states = batch_of_states_apply_action(states, a, np_rng)
+          if not succseful:
+            break
+          env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
+          timesteps.append(
+              TimeStep(
+                  env=prev_env_step,
+                  actor=ActorStep(
+                      action_oh=actor_step.action_oh,
+                      policy=actor_step.policy,
+                      rewards=env_step.rewards),
+              ))
+        if not succseful:
+          print("Redoing batch", flush=True)
+          continue
+          
         
-      
-        
-      queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))
+          
+        queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))

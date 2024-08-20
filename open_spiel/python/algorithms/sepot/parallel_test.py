@@ -8,6 +8,7 @@ from multiprocessing.managers import BaseManager
 import multiprocessing as mp
 import time
 
+from pyinstrument import Profiler
 
 class RandomClass():
   def __init__(self):
@@ -135,9 +136,12 @@ def goofspiel_parallel():
       game_name = game_name, 
       game_params = game_params,
       trajectory_max =  max_trajectory,
-      policy_network_layers = [32, 32],
-      mvs_network_layers = [32, 32],
-      transformation_network_layers = [32, 32],
+      # policy_network_layers = [32, 32],
+      # mvs_network_layers = [32, 32],
+      # transformation_network_layers = [32, 32],
+      policy_network_layers = [128, 128],
+      mvs_network_layers = [128, 128],
+      transformation_network_layers = [128, 128],
       
       batch_size = 32,
       learning_rate = 3e-4,
@@ -153,14 +157,20 @@ def goofspiel_parallel():
   )
   solver = rnad.RNaDSolver(rnad_config)
   print(jax.devices('cpu'))
+  
+  print(mp.cpu_count(), flush=True)
   # print(jax.devices('gpu'))
   
+  profiler = Profiler()
+  profiler.start()
   
   start = time.time()
   solver.parallel_steps(test_iters)
   print(time.time() - start)
   
   
+  profiler.stop()
+  print(profiler.output_text(unicode=False, color=False))
   start = time.time()
   for i in range(test_iters):
     solver.step()
