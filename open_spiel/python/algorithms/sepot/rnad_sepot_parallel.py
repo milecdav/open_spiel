@@ -34,6 +34,9 @@ import pyspiel
 import multiprocessing as mp
 from multiprocessing.managers import BaseManager
 
+
+from pyinstrument import Profiler
+
 import contextlib
         
 class ParallelWrapper():
@@ -1323,6 +1326,11 @@ class RNaDSolver(policy_lib.Policy):
     return logs
   
   def parallel_steps(self, num_steps: int):
+    
+  
+    profiler = Profiler()
+    profiler.start()
+    
     start_time = time.time()
     mp.set_start_method('spawn', force=True)
     num_threads = 15
@@ -1385,6 +1393,8 @@ class RNaDSolver(policy_lib.Policy):
     params_wrapper.stop_sampling()
     # time.sleep(2)
     print("Training took:", time.time() - start_time, flush=True)
+    profiler.stop()
+    print(profiler.output_text(unicode=False, color=False), flush=True)
     time.sleep(3)
     
     while not queue.empty() or queue.qsize() > 0:
