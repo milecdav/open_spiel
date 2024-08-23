@@ -1,8 +1,12 @@
 from open_spiel.python.algorithms.sepot import rnad_sepot_parallel as rnad
 
 import numpy as np
-import jax
 import os
+
+# This needs to be called before import jax!
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
+import jax
 
 from multiprocessing.managers import BaseManager
 import multiprocessing as mp
@@ -235,3 +239,4 @@ def dark_chess_parallel():
     
 if __name__ == "__main__":
   dark_chess_parallel()
+  # goofspiel_parallel()

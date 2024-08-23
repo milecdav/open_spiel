@@ -35,38 +35,6 @@ import multiprocessing as mp
 from multiprocessing.managers import BaseManager
 
 import contextlib
-
-
-@contextlib.contextmanager
-def modified_environ(*remove, **update):
-    """
-    Temporarily updates the ``os.environ`` dictionary in-place.
-
-    The ``os.environ`` dictionary is updated in-place so that the modification
-    is sure to work in all situations.
-
-    :param remove: Environment variables to remove.
-    :param update: Dictionary of environment variables and values to add/update.
-    """
-    env = os.environ
-    update = update or {}
-    remove = remove or []
-
-    # List of environment variables being updated or removed.
-    stomped = (set(update.keys()) | set(remove)) & set(env.keys())
-    # Environment variables and values to restore on exit.
-    update_after = {k: env[k] for k in stomped}
-    # Environment variables and values to remove on exit.
-    remove_after = frozenset(k for k in update if k not in env)
-
-    try:
-        env.update(update)
-        [env.pop(k, None) for k in remove]
-        yield
-    finally:
-        env.update(update_after)
-        [env.pop(k) for k in remove_after]
-        
         
 class ParallelWrapper():
   def __init__(self):
@@ -1365,12 +1333,13 @@ class RNaDSolver(policy_lib.Policy):
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
     # params_cpu = jax.device_put(self.params, jax.devices("cpu")[0])["params"]
+    # Could we just keep this on the GPU somehow? (not when talking about pickling the stuff)
     params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
     params_wrapper.set(params_cpu)
     rng_keys = self._next_rng_keys(num_threads)
     np_keys = [np.random.RandomState(self._np_rng.randint(0, 2**32)) for _ in range(num_threads)]
     
-    processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key)) for rng_key, np_key in zip(rng_keys, np_keys)]
+    processes = [mp.Process(target=collect_trajectories, args=(self.config, params_wrapper, queue, rng_key, np_key)) for rng_key, np_key in zip(rng_keys, np_keys)]
     # processes = [mp.Process(target=collect_trajectories, args=(self.config,  params_wrapper, queue, rng_key, np_key, functools.partial(jax.jit, fun=_network_jit_sample, static_argnums=(0, 1), device = devices[i % len(devices)]))) for i, (rng_key, np_key) in enumerate(zip(rng_keys, np_keys))]
     # print("Created")
     for p in processes:
@@ -1392,7 +1361,7 @@ class RNaDSolver(policy_lib.Policy):
           self.optimizer, self.optimizer_target, timestep, alpha,
           self.learner_steps, update_target_net)
       
-      if step % 20 == 0:
+      if step % 5 == 0:
         params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
         params_wrapper.set(params_cpu)
 
@@ -1666,6 +1635,30 @@ def actor_step_func(network, params, rng_key, distinct_actions, batch_size, env_
 
   return action, actor_step
 
+def actor_step_not_jitted(network, params, np_rng, distinct_actions, batch_size, env_step: EnvStep):
+  
+  pi, _, _, _ = network.apply(params, env_step)
+  pi = np.asarray(pi).astype("float64")
+  
+  pi = pi / np.sum(pi, axis=-1, keepdims=True)
+
+  action = np.apply_along_axis(
+      lambda x: np_rng.choice(range(pi.shape[1]), p=x), axis=-1, arr=pi)
+  # TODO(author16): reapply the legal actions mask to bullet-proof sampling.
+  action_oh = np.zeros(pi.shape, dtype="float64")
+  action_oh[range(pi.shape[0]), action] = 1.0
+
+  actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())  # pytype: disable=wrong-arg-types  # numpy-scalars
+
+  
+  # pi = np.asarray(pi, dtype=np.float32)
+  # action = np.asarray(action, dtype=np.int32)
+  # action_oh = np.asarray(action_oh, dtype=np.float32)
+
+  # actor_step = ActorStep(policy=pi, action_oh=action_oh, rewards=())
+
+  return action, actor_step
+
 
 def actor_step_jitted(network, jitted_call, params, rng_key, distinct_actions, env_step: EnvStep):
   
@@ -1746,60 +1739,59 @@ def batch_of_states_apply_action(
   return True, states 
   
 def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
-  with modified_environ(XLA_PYTHON_CLIENT_PREALLOCATE='false'):
-    with jax.default_device(jax.devices("cpu")[0]):
-      game_params = {}
-      for n, p in config.game_params:
-        game_params[n] = p
-      game = pyspiel.load_game(config.game_name, game_params)
-      if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
-        game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
-      distinct_actions = game.num_distinct_actions()
+  game_params = {}
+  for n, p in config.game_params:
+    game_params[n] = p
+  game = pyspiel.load_game(config.game_name, game_params)
+  if game.get_type().dynamics == pyspiel.GameType.Dynamics.SIMULTANEOUS:
+    game = pyspiel.load_game_as_turn_based(config.game_name, game_params)
+  distinct_actions = game.num_distinct_actions()
+  
+  ex_state = play_chance(game.new_initial_state(), np_rng)
+  network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
+  # print("Initalized thread")
+  while True:
+    if not params_wrapper.is_sampling():
+      # print("Stopped sampling", flush=True)
+      break
+    if queue.qsize() > 60:
+      time.sleep(0.02)
+      continue
+    states = [
+        play_chance(game.new_initial_state(), np_rng)
+        for _ in range(config.batch_size)
+    ]
+    timesteps = []
+    
+    env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
+    for _ in range(config.trajectory_max):
       
-      ex_state = play_chance(game.new_initial_state(), np_rng)
-      network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
-      # print("Initalized thread")
-      while True:
-        if not params_wrapper.is_sampling():
-          # print("Stopped sampling", flush=True)
-          break
-        if queue.qsize() > 60:
-          time.sleep(0.02)
-          continue
-        states = [
-            play_chance(game.new_initial_state(), np_rng)
-            for _ in range(config.batch_size)
-        ]
-        timesteps = []
-        
-        env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-        for _ in range(config.trajectory_max):
-          
-          prev_env_step = env_step
-          # rngs = []
-          # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
-          # for i in range(config.batch_size):
-          #   rng_key, actor_step_rng = jax.random.split(rng_key)
-          #   rngs.append(actor_step_rng)
-          # rngs = np.asarray(rngs)
-          
-          a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
-          succseful, states = batch_of_states_apply_action(states, a, np_rng)
-          if not succseful:
-            break
-          env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
-          timesteps.append(
-              TimeStep(
-                  env=prev_env_step,
-                  actor=ActorStep(
-                      action_oh=actor_step.action_oh,
-                      policy=actor_step.policy,
-                      rewards=env_step.rewards),
-              ))
-        if not succseful:
-          print("Redoing batch", flush=True)
-          continue
-          
-        
-          
-        queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))
+      prev_env_step = env_step
+      # rngs = []
+      # # This is stupid but jax.random.split works in parallel and it breaks multiprocessing
+      # for i in range(config.batch_size):
+      #   rng_key, actor_step_rng = jax.random.split(rng_key)
+      #   rngs.append(actor_step_rng)
+      # rngs = np.asarray(rngs)
+      
+      # a, actor_step = actor_step_func(network, params_wrapper.get(), rng_key, distinct_actions, config.batch_size, env_step)
+      a, actor_step = actor_step_not_jitted(network, params_wrapper.get(), np_rng, distinct_actions, config.batch_size, env_step)
+      succseful, states = batch_of_states_apply_action(states, a, np_rng)
+      if not succseful:
+        break
+      env_step = batch_of_states_as_env_step(states, ex_state, config.state_representation)
+      timesteps.append(
+          TimeStep(
+              env=prev_env_step,
+              actor=ActorStep(
+                  action_oh=actor_step.action_oh,
+                  policy=actor_step.policy,
+                  rewards=env_step.rewards),
+          ))
+    if not succseful:
+      print("Redoing batch", flush=True)
+      continue
+      
+    
+      
+    queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))
