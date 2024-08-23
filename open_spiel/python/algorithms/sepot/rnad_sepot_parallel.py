@@ -1384,7 +1384,7 @@ class RNaDSolver(policy_lib.Policy):
     # TODO: This often results in a deadlock
     params_wrapper.stop_sampling()
     # time.sleep(2)
-    print("Training took:", time.time() - start_time)
+    print("Training took:", time.time() - start_time, flush=True)
     time.sleep(3)
     
     while not queue.empty() or queue.qsize() > 0:
