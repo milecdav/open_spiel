@@ -1323,8 +1323,9 @@ class RNaDSolver(policy_lib.Policy):
     return logs
   
   def parallel_steps(self, num_steps: int):
+    start_time = time.time()
     mp.set_start_method('spawn', force=True)
-    num_threads = 8
+    num_threads = 15
     BaseManager.register('ParallelWrapper', ParallelWrapper)
     manager = BaseManager()
     
@@ -1351,6 +1352,7 @@ class RNaDSolver(policy_lib.Policy):
       while queue.empty():
         pass
       # print("getting from queue")
+      # This takes roughly 2.5-times more than updating parameters
       timestep = queue.get()
       policy_before_train = self._network_jit_apply(self.params, timestep.env)
 
@@ -1361,8 +1363,9 @@ class RNaDSolver(policy_lib.Policy):
           self.optimizer, self.optimizer_target, timestep, alpha,
           self.learner_steps, update_target_net)
       
-      if step % 5 == 0:
-        params_cpu = jax.tree.map(lambda x: np.array(x), self.params)
+      # This is a bottleneck, so less frequent update is faster, but less accurate.
+      if step % 20 == 0:
+        params_cpu = jax.tree.map(lambda x: np.asarray(x), self.params)
         params_wrapper.set(params_cpu)
 
       policy_after_train = self._network_jit_apply(self.params, timestep.env)
@@ -1377,9 +1380,13 @@ class RNaDSolver(policy_lib.Policy):
           self.mvs_optimizer_target, timestep)
       # print("Done iteration")
     
+    
+    # TODO: This often results in a deadlock
     params_wrapper.stop_sampling()
     # time.sleep(2)
+    print("Training took:", time.time() - start_time)
     time.sleep(3)
+    
     while not queue.empty() or queue.qsize() > 0:
       queue.get()
     # queue.close()
@@ -1754,9 +1761,9 @@ def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
     if not params_wrapper.is_sampling():
       # print("Stopped sampling", flush=True)
       break
-    if queue.qsize() > 60:
-      time.sleep(0.02)
-      continue
+    # if queue.qsize() > 60:
+    #   time.sleep(0.02)
+    #   continue
     states = [
         play_chance(game.new_initial_state(), np_rng)
         for _ in range(config.batch_size)
@@ -1792,6 +1799,7 @@ def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
       print("Redoing batch", flush=True)
       continue
       
-    
-      
+    # If there is more than 40 items in queue, we take the first one out.
+    if queue.qsize() > 40:
+      queue.get()
     queue.put(jax.tree_util.tree_map(lambda *xs: np.stack(xs, axis=0), *timesteps))

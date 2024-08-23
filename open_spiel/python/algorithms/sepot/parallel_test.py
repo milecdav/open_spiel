@@ -185,7 +185,7 @@ def dark_chess_parallel():
   os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
   game_name = "dark_chess"
   game_params = tuple()
-  test_iters = 70
+  test_iters = 1000
   max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
