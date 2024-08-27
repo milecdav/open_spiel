@@ -1338,7 +1338,7 @@ class RNaDSolver(policy_lib.Policy):
     manager = BaseManager()
     
     manager.start()
-    queue = manager.Manager().Queue()
+    queue = mp.Manager().Queue()
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
     # params_cpu = jax.device_put(self.params, jax.devices("cpu")[0])["params"]
