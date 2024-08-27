@@ -1333,12 +1333,12 @@ class RNaDSolver(policy_lib.Policy):
     
     start_time = time.time()
     mp.set_start_method('spawn', force=True)
-    num_threads = 15
+    num_threads = 31
     BaseManager.register('ParallelWrapper', ParallelWrapper)
     manager = BaseManager()
     
     manager.start()
-    queue = mp.Queue()
+    queue = mp.Manager().Queue()
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
     # params_cpu = jax.device_put(self.params, jax.devices("cpu")[0])["params"]
@@ -1389,14 +1389,16 @@ class RNaDSolver(policy_lib.Policy):
       # print("Done iteration")
     
     
-    # TODO: This often results in a deadlock
-    params_wrapper.stop_sampling()
     # time.sleep(2)
     print("Training took:", time.time() - start_time, flush=True)
     profiler.stop()
     print(profiler.output_text(unicode=False, color=False), flush=True)
-    time.sleep(3)
     
+    
+    params_wrapper.stop_sampling()
+    time.sleep(3)
+  
+    # TODO: This often results in a deadlock
     while not queue.empty() or queue.qsize() > 0:
       queue.get()
     # queue.close()
