@@ -32,7 +32,7 @@ from open_spiel.python import policy as policy_lib
 import pyspiel
 
 import multiprocessing as mp
-from multiprocessing.managers import BaseManager
+from multiprocessing.managers import BaseManager, SyncManager
 
 
 from pyinstrument import Profiler
@@ -1334,11 +1334,11 @@ class RNaDSolver(policy_lib.Policy):
     start_time = time.time()
     mp.set_start_method('spawn', force=True)
     num_threads = 31
-    BaseManager.register('ParallelWrapper', ParallelWrapper)
-    manager = BaseManager()
+    SyncManager.register('ParallelWrapper', ParallelWrapper)
+    manager = SyncManager()
     
     manager.start()
-    queue = mp.Manager().Queue()
+    queue = manager.Queue()
     devices = jax.devices('cpu')
     params_wrapper = manager.ParallelWrapper()
     # params_cpu = jax.device_put(self.params, jax.devices("cpu")[0])["params"]
