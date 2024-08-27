@@ -29,32 +29,34 @@ import open_spiel.python.algorithms.sepot.sepot as sepot
 from open_spiel.python.algorithms.get_all_states import get_all_states
 from pyinstrument import Profiler
 
-# from open_spiel.python.algorithms.
+from open_spiel.python.algorithms.sepot.utils import compare_policies_mvs_rnad, resolve_first_subgame_then_rnad
 
 parser = argparse.ArgumentParser()
 # Experiments specific arguments
 
-parser.add_argument("--iterations", default=5001, type=int, help="Amount of main iterations (each saves model)")
-parser.add_argument("--save_each", default=2000, type=int, help="Length of each iteration in seconds")
+parser.add_argument("--iterations", default=200001, type=int, help="Amount of main iterations (each saves model)")
+parser.add_argument("--save_each", default=20000, type=int, help="Length of each iteration in seconds")
 parser.add_argument("--seed", default=42, type=int, help="Random seed")
 
 # (Se)RNaD experiment specific arguments
-parser.add_argument("--batch_size", default=32, type=int, help="Batch size")
-parser.add_argument("--entropy_schedule", default=[500, 10000], nargs="+", type=int, help="Entropy schedule")
-parser.add_argument("--entropy_schedule_repeats", default=[200, 1], nargs="+", type=int, help="Entropy schedule repeats")
-parser.add_argument("--rnad_network_layers", default=[128, 128], nargs="+", type=int, help="Network layers")
-parser.add_argument("--mvs_network_layers", default=[128, 128], nargs="+", type=int, help="Network layers")
-parser.add_argument("--transformation_network_layers", default=[128, 128], nargs="+", type=int, help="Network layers")
+parser.add_argument("--batch_size", default=64, type=int, help="Batch size")
+parser.add_argument("--entropy_schedule", default=[1000, 10000], nargs="+", type=int, help="Entropy schedule")
+parser.add_argument("--entropy_schedule_repeats", default=[30, 1], nargs="+", type=int, help="Entropy schedule repeats")
+parser.add_argument("--rnad_network_layers", default=[256, 256], nargs="+", type=int, help="Network layers")
+parser.add_argument("--mvs_network_layers", default=[256, 256], nargs="+", type=int, help="Network layers")
+parser.add_argument("--transformation_network_layers", default=[256, 256], nargs="+", type=int, help="Network layers")
 parser.add_argument("--learning_rate", default=3e-4, type=float, help="Learning Rate")
-parser.add_argument("--c_vtrace", default=1.0, type=float, help="Clipping of vtrace")
+parser.add_argument("--c_vtrace", default=np.inf, type=float, help="Clipping of vtrace")
 parser.add_argument("--rho_vtrace", default=np.inf, type=float, help="Clipping of vtrace")
 parser.add_argument("--eta", default=0.2, type=float, help="Regularization term")
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of P1")
 
 # Game Setting
-parser.add_argument("--cards", default=4, type=int, help="Goofspiel cards")
+parser.add_argument("--cards", default=5, type=int, help="Goofspiel cards")
 parser.add_argument("--points_order", default="descending", type=str, help="Oredering of point card, choose between 'descending', 'ascending' and 'random'")
 
+# Evaluate setting
+parser.add_argument("--saved_model", default="sepot_networks/goofspiel_4_descending/full_sepot_test.pkl", type=str, help="Path to a saved model")
 
 def train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
@@ -108,7 +110,6 @@ def train():
       file = "/rnad_" + str(args.seed) + "_" + str(iteration) + ".pkl"
       file_path = save_folder + file
       with open(file_path, "wb") as f:
-        print(solver.mvs_params)
         pickle.dump(solver, f)
       print("Saved at iteration", iteration, "after", int(time.time() - start), flush=True)
 
@@ -190,6 +191,16 @@ def full_sepot_test():
   profiler = Profiler()
   profiler.start()
   sepot_solver.train(args.iterations)
+  
+  
+  save_folder = "sepot_networks/goofspiel_" + str(args.cards) + "_" + args.points_order
+  if not os.path.exists(save_folder):
+    os.makedirs(save_folder) 
+  save_file = save_folder + "/full_sepot_test.pkl" 
+  with open(save_file, "wb") as f:
+    pickle.dump(sepot_solver, f)
+    
+  
   tab_policy = policy.TabularPolicy(sepot_solver.rnad._game)
   print("trained")
   all_states = get_all_states(
@@ -218,9 +229,19 @@ def full_sepot_test():
 
 
   i+= 1 
+  
+
      
+def evaluate():
+  args = parser.parse_args([] if "__file__" not in globals() else None)
+
+  with open(args.saved_model, "rb") as f:
+    solver = pickle.load(f)
+  # resolve_first_subgame_then_rnad(solver)
+  compare_policies_mvs_rnad(solver)
 
 
 if __name__ == "__main__":
-  full_sepot_test()
-  
+  # full_sepot_test()
+  # evaluate()
+  train()
