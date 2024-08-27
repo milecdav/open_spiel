@@ -101,11 +101,19 @@ class TurnBasedSimultaneousGame : public Game {
   absl::optional<double> UtilitySum() const override {
     return game_->UtilitySum();
   }
+
+  // TODO(kubicon): OLD VERSION
   std::vector<int> InformationStateTensorShape() const override {
-    // We flatten the representation of the underlying game and add one-hot
-    // indications of the to-play player and the observing player.
-    return {2 * NumPlayers() + game_->InformationStateTensorSize()};
+    return {NumDistinctActions() + NumPlayers()
+            + game_->InformationStateTensorSize()};
   }
+
+  // TODO(kubicon): NEW VERSION
+  // std::vector<int> InformationStateTensorShape() const override {
+  //   // We flatten the representation of the underlying game and add one-hot
+  //   // indications of the to-play player and the observing player.
+  //   return {2 * NumPlayers() + game_->InformationStateTensorSize()};
+  // }
 
 
   std::vector<int> StateTensorShape() const override {

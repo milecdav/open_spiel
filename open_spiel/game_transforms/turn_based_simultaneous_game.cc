@@ -182,27 +182,50 @@ std::string TurnBasedSimultaneousState::InformationStateString(
   return extra_info + state_->InformationStateString(player);
 }
 
+//TOOD(kubicon): Old Version
 void TurnBasedSimultaneousState::InformationStateTensor(
     Player player, absl::Span<float> values) const {
   SPIEL_CHECK_GE(player, 0);
   SPIEL_CHECK_LT(player, num_players_);
 
   SPIEL_CHECK_EQ(values.size(), game_->InformationStateTensorSize());
+
   auto value_it = values.begin();
 
-  // First, get the 2 * num_players bits to encode whose turn it is and who
-  // the observer is.
-  for (auto p = Player{0}; p < num_players_; ++p) {
-    *value_it++ = (p == current_player_ ? 1 : 0);
+  for (int a = 0; a < GetGame()->NumDistinctActions(); ++a) {
+    *value_it++ = action_vector_[player] == a && history_.size() >= 2 ? 1 : 0;
   }
-  for (auto p = Player{0}; p < num_players_; ++p) {
-    *value_it++ = (p == player ? 1 : 0);
+  for (int pl = 0; pl < GetGame()->NumPlayers(); ++pl) {
+    *value_it++ = pl == current_player_ ? 1 : 0;
   }
 
   // Then get the underlying observation
   state_->InformationStateTensor(player,
                                  absl::MakeSpan(value_it, values.end()));
 }
+
+// TODO(kubicon): New version
+// void TurnBasedSimultaneousState::InformationStateTensor(
+//     Player player, absl::Span<float> values) const {
+//   SPIEL_CHECK_GE(player, 0);
+//   SPIEL_CHECK_LT(player, num_players_);
+
+//   SPIEL_CHECK_EQ(values.size(), game_->InformationStateTensorSize());
+//   auto value_it = values.begin();
+
+//   // First, get the 2 * num_players bits to encode whose turn it is and who
+//   // the observer is.
+//   for (auto p = Player{0}; p < num_players_; ++p) {
+//     *value_it++ = (p == current_player_ ? 1 : 0);
+//   }
+//   for (auto p = Player{0}; p < num_players_; ++p) {
+//     *value_it++ = (p == player ? 1 : 0);
+//   }
+
+//   // Then get the underlying observation
+//   state_->InformationStateTensor(player,
+//                                  absl::MakeSpan(value_it, values.end()));
+// }
 
 void TurnBasedSimultaneousState::StateTensor(absl::Span<float> values) const {
   SPIEL_CHECK_EQ(values.size(), game_->StateTensorSize());

@@ -116,6 +116,7 @@ class GoofspielObserver : public Observer {
     const bool imp_info = game.IsImpInfo();
     const bool pub_info = iig_obs_type_.public_info;
     const bool perf_rec = iig_obs_type_.perfect_recall;
+    const bool priv_none = iig_obs_type_.private_info == PrivateInfoType::kNone;
     const bool priv_one =
         iig_obs_type_.private_info == PrivateInfoType::kSinglePlayer;
     const bool priv_all =
@@ -123,47 +124,70 @@ class GoofspielObserver : public Observer {
 
 
     // // TODO: Old version
-    // if (imp_info && pub_info && perf_rec && priv_all) {
-    //   WritePointsTotal(game, state, 0, allocator);
-    // // std::cout << "Writing Hands" << std::endl;
-    //   WriteAllPlayersHands(game, state, 0, allocator);
-    // // std::cout << "Writing Win" << std::endl;
-    //   WriteWinSequence(game, state, 0, allocator);
-    // // std::cout << "Writing Tie" << std::endl;
-    //   WriteTieSequence(game, state, allocator);
-    // // std::cout << "Writing Ooint cards" << std::endl;
-    //   WritePointCardSequence(game, state, allocator);
-    // // std::cout << "Writing actions" << std::endl;
-    //   WriteAllPlayersActionSequences(game, state, allocator);
-    
-    //   return;
-    // }
-
-    //TODO new version
-    // State tensor
     if (imp_info && pub_info && perf_rec && priv_all) {
-      // TODO: Previous version had more information, so compare the results
+      WritePointsTotal(game, state, 0, allocator);
+    // std::cout << "Writing Hands" << std::endl;
+      WriteAllPlayersHands(game, state, 0, allocator);
+    // std::cout << "Writing Win" << std::endl;
+      WriteWinSequence(game, state, 0, allocator);
+    // std::cout << "Writing Tie" << std::endl;
+      WriteTieSequence(game, state, allocator);
+    // std::cout << "Writing Ooint cards" << std::endl;
       WritePointCardSequence(game, state, allocator);
     // std::cout << "Writing actions" << std::endl;
       WriteAllPlayersActionSequences(game, state, allocator);
+    
       return;
     }
 
+    //TODO new version
+    // State tensor
+    // if (imp_info && pub_info && perf_rec && priv_all) {
+    //   // TODO: Previous version had more information, so compare the results
+    //   WritePointCardSequence(game, state, allocator);
+    // // std::cout << "Writing actions" << std::endl;
+    //   WriteAllPlayersActionSequences(game, state, allocator);
+    //   return;
+    // }
 
-    // Conditionally write each field.
+
+    // TODO(kubicon): old versions
     if (pub_info && !perf_rec) {
       WriteCurrentPointCard(game, state, allocator);
       WriteRemainingPointCards(game, state, allocator);
     }
     if (pub_info) WritePointsTotal(game, state, player, allocator);
-    if (imp_info && priv_one) WritePlayerHand(game, state, player, allocator);
+    if (imp_info && priv_one) WritePlayerHand(game, state, player, allocator); 
+    if (imp_info && priv_all) WriteAllPlayersHands(game, state, player, allocator); // Added by me
+
     if (imp_info && pub_info) WriteWinSequence(game, state, player, allocator);
     if (imp_info && pub_info) WriteTieSequence(game, state, allocator);
     if (pub_info && perf_rec) WritePointCardSequence(game, state, allocator);
-    if (imp_info && perf_rec && priv_one)
-      WritePlayerActionSequence(game, state, player, allocator);
+    if (imp_info && perf_rec && priv_one) WritePlayerActionSequence(game, state, player, allocator);
+    else if (imp_info && perf_rec && priv_all) WriteAllPlayersActionSequences(game, state, allocator);
+    // Added to write the tie
+    else if (imp_info && perf_rec && pub_info) WriteTieSequenceCards(game, state, allocator);
+
+
     if (!imp_info && pub_info)
       WriteAllPlayersHands(game, state, player, allocator);
+
+    // TODO(kubicon): New version
+    // Conditionally write each field.
+    // if (pub_info && !perf_rec) {
+    //   WriteCurrentPointCard(game, state, allocator);
+    //   WriteRemainingPointCards(game, state, allocator);
+    // }
+    // if (pub_info) WritePointsTotal(game, state, player, allocator);
+    // if (imp_info && priv_one) WritePlayerHand(game, state, player, allocator);
+    // if (imp_info && pub_info) WriteWinSequence(game, state, player, allocator);
+    // if (imp_info && pub_info && !priv_none) WriteTieSequence(game, state, allocator);
+    // if (imp_info && pub_info && priv_none) WriteTieSequenceCards(game, state, allocator);
+    // if (pub_info && perf_rec) WritePointCardSequence(game, state, allocator);
+    // if (imp_info && perf_rec && priv_one)
+    //   WritePlayerActionSequence(game, state, player, allocator);
+    // if (!imp_info && pub_info)
+    //   WriteAllPlayersHands(game, state, player, allocator);
   }
 
   std::string StringFrom(const State& observed_state,
@@ -274,6 +298,16 @@ class GoofspielObserver : public Observer {
       if (state.win_sequence_[i] == kInvalidPlayer) out.at(i) = 1.0;
     }
   }
+  // Sequence of when a tie was made for each trick.
+  void WriteTieSequenceCards(const GoofspielGame& game, const GoofspielState& state,
+                        Allocator* allocator) const {
+    auto out = allocator->Get("tie_sequence_cards", {game.NumRounds(), game.NumCards()});
+    for (int i = 0; i < state.win_sequence_.size(); ++i) {
+      // Since both players played same card, we cna 
+      if (state.win_sequence_[i] == kInvalidPlayer) out.at(i, state.actions_history_[i][0]) = 1.0;
+    }
+  }
+
 
   void WriteRemainingPointCards(const GoofspielGame& game,
                                 const GoofspielState& state,
@@ -852,17 +886,46 @@ std::vector<int> GoofspielGame::InformationStateTensorShape() const {
   }
 }
 
-
+// TODO(kubicon): Old version
 std::vector<int> GoofspielGame::StateTensorShape() const {
-    if (impinfo_) {
-    return {// A sequence of 1-hot bit vectors encoding the point card sequence.
+  if (impinfo_) {
+    return {// 1-hot bit vector for point total per player; upper bound is 1 +
+            // 2 + ... + N = N*(N+1) / 2, but must add one to include 0 points.
+            num_players_ * ((num_cards_ * (num_cards_ + 1)) / 2 + 1) +
+            // Bit vector for each player remaining cards:
+            num_players_ * num_cards_ +
+            // A sequence of 1-hot bit vectors encoding the player who won that
+            // turn.
+            num_turns_ * num_players_ + 
+            // Tie sequence.
+            num_cards_ + 
+            // A sequence of 1-hot bit vectors encoding the point card sequence.
             num_turns_ * num_cards_ +
-            // All players action sequence.
+            // Both players own action sequence.
             num_players_ * num_turns_ * num_cards_};
   } else {
-    return InformationStateTensorShape();
+    return {// 1-hot bit vector for point total per player; upper bound is 1 +
+            // 2 + ... + N = N*(N+1) / 2, but must add one to include 0 points.
+            num_players_ * ((num_cards_ * (num_cards_ + 1)) / 2 + 1) +
+            // A sequence of 1-hot bit vectors encoding the point card sequence.
+            num_turns_ * num_cards_ +
+            // Bit vector for each card per player.
+            num_players_ * num_cards_};
   }
 }
+
+
+// TODO(kubicon): New Version
+// std::vector<int> GoofspielGame::StateTensorShape() const {
+//     if (impinfo_) {
+//     return {// A sequence of 1-hot bit vectors encoding the point card sequence.
+//             num_turns_ * num_cards_ +
+//             // All players action sequence.
+//             num_players_ * num_turns_ * num_cards_};
+//   } else {
+//     return InformationStateTensorShape();
+//   }
+// }
 
 
 std::vector<int> GoofspielGame::PublicStateTensorShape() const {
@@ -873,8 +936,8 @@ std::vector<int> GoofspielGame::PublicStateTensorShape() const {
             // Sequence of one-hot relative
             // distances to the winner of a turn.
             num_turns_ * num_players_ +
-            // Tie sequence
-            num_cards_ + 
+            // Tie sequence. Unlike for information state, this has to contain the card, to tell a difference between tie with 2s or 3s.
+            num_turns_ * num_cards_ + 
             // A sequence of 1-hot bit vectors encoding the point card sequence.
             num_turns_ * num_cards_};
   } else {
