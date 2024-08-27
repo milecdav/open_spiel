@@ -1096,6 +1096,8 @@ class RNaDSolver(policy_lib.Policy):
     # Multi Valued states
     # The order is Identity, P2 transformations, P1 transformations
     else:
+      # Identity transform
+      mvs_transformations = jnp.zeros_like(ts.actor.policy)[..., jnp.newaxis]
       for pl in range(self._game.num_players() -1, -1, -1):
         transformation_direction = transformation_rollout(transformation_params[pl], ts.env)
         transformation_direction = normalize_direction_with_mask(transformation_direction, ts.env.legal)
