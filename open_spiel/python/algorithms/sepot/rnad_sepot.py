@@ -873,7 +873,7 @@ class TransformationsNetwork(nn.Module):
 
   @nn.compact
   def __call__(self, env_step: EnvStep):
-    x = env_step.state
+    x = env_step.obs
     for size in self.network_layers:
       x = nn.Dense(size)(x)              # create inline Flax Module submodules
       x = nn.relu(x)
