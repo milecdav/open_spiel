@@ -57,7 +57,7 @@ def train():
   if not os.path.exists(save_folder):
     os.makedirs(save_folder)
   
-  max_trajectory = 120
+  max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
       game_params = tuple(),
@@ -116,7 +116,7 @@ def parallel_train():
   if not os.path.exists(save_folder):
     os.makedirs(save_folder)
   
-  max_trajectory = 120
+  max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
       game_params = tuple(),
@@ -142,12 +142,12 @@ def parallel_train():
 
   solver =  rnad.RNaDSolver(rnad_config)
   
-  profiler = Profiler()
-  profiler.start()
+  # profiler = Profiler()
+  # profiler.start()
   
   solver.parallel_steps(args.iterations, args.save_each, save_folder)
-  profiler.stop()
-  print(profiler.output_text(color=True, unicode=True))
+  # profiler.stop()
+  # print(profiler.output_text(color=True, unicode=True))
   i+= 1 
   
 
