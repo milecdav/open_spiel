@@ -19,12 +19,7 @@ import pickle
 
 import time
 
-
-from open_spiel.python import policy
-from open_spiel.python.algorithms import best_response
-
-import open_spiel.python.algorithms.sepot.rnad_sepot as rnad  
-import open_spiel.python.algorithms.sepot.sepot as sepot
+import open_spiel.python.algorithms.sepot.rnad_sepot_dark_chess as rnad
 
 from open_spiel.python.algorithms.get_all_states import get_all_states
 from pyinstrument import Profiler
@@ -35,18 +30,18 @@ parser = argparse.ArgumentParser()
 # Experiments specific arguments
 
 parser.add_argument("--iterations", default=101, type=int, help="Amount of main iterations (each saves model)")
-parser.add_argument("--save_each", default=50, type=int, help="Length of each iteration in seconds")
+parser.add_argument("--save_each", default=5000, type=int, help="Length of each iteration in seconds")
 parser.add_argument("--seed", default=42, type=int, help="Random seed")
 
 # (Se)RNaD experiment specific arguments
 parser.add_argument("--batch_size", default=32, type=int, help="Batch size")
-parser.add_argument("--entropy_schedule", default=[500, 10000], nargs="+", type=int, help="Entropy schedule")
-parser.add_argument("--entropy_schedule_repeats", default=[200, 1], nargs="+", type=int, help="Entropy schedule repeats")
+parser.add_argument("--entropy_schedule", default=[4000, 10000], nargs="+", type=int, help="Entropy schedule")
+parser.add_argument("--entropy_schedule_repeats", default=[50, 1], nargs="+", type=int, help="Entropy schedule repeats")
 parser.add_argument("--rnad_network_layers", default=[32, 32], nargs="+", type=int, help="Network layers")
 parser.add_argument("--mvs_network_layers", default=[32, 32], nargs="+", type=int, help="Network layers")
 parser.add_argument("--transformation_network_layers", default=[32, 32], nargs="+", type=int, help="Network layers")
 parser.add_argument("--learning_rate", default=3e-4, type=float, help="Learning Rate")
-parser.add_argument("--c_vtrace", default=1.5, type=float, help="Clipping of vtrace")
+parser.add_argument("--c_vtrace", default=2.0, type=float, help="Clipping of vtrace")
 parser.add_argument("--rho_vtrace", default=np.inf, type=float, help="Clipping of vtrace")
 parser.add_argument("--eta", default=0.2, type=float, help="Regularization term")
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of both players")
@@ -62,14 +57,14 @@ def train():
   if not os.path.exists(save_folder):
     os.makedirs(save_folder)
   
-  max_trajectory = 80
+  max_trajectory = 120
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
       game_params = tuple(),
       trajectory_max =  max_trajectory,
-      policy_network_layers = args.rnad_network_layers,
-      mvs_network_layers = args.mvs_network_layers,
-      transformation_network_layers = args.transformation_network_layers,
+      # policy_network_layers = args.rnad_network_layers,
+      # mvs_network_layers = args.mvs_network_layers,
+      # transformation_network_layers = args.transformation_network_layers,
       
       batch_size = args.batch_size,
       learning_rate = args.learning_rate,
@@ -86,11 +81,6 @@ def train():
   )
   i = 0
 
-  chess = pyspiel.load_game("chess")
-  dark_chess = pyspiel.load_game("dark_chess")
-  print(chess.observation_tensor_shape())
-  print(dark_chess.observation_tensor_shape())
-  print(dark_chess.state_tensor_shape())
   solver =  rnad.RNaDSolver(rnad_config)
   start = time.time()
   print_iter_time = time.time() # We will save the model in first step
