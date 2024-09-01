@@ -102,6 +102,10 @@ class DarkChessState : public State {
     return moves_history_;
   }
 
+  std::array<int, 64> LastSeenPiece(chess::Color color, chess::PieceType piece_type) const {
+    return last_seen_[chess::ToInt(color)][(int) piece_type - 1];
+  }
+
  protected:
   void DoApplyAction(Action action) override;
 
@@ -128,6 +132,10 @@ class DarkChessState : public State {
   chess::ChessBoard start_board_;
   // We store the current board position as an optimization.
   chess::ChessBoard current_board_;
+
+  // TODO(kubicon) This is specific for 8x8 chess and is here only for now.
+  // For each color, each piece it stores the time when it was saw the last time at given position by opponent
+  std::array<std::array<std::array<int, 64>, 6>, 2> last_seen_;
 
   // RepetitionTable records how many times the given hash exists in the history
   // stack (including the current board).
@@ -160,24 +168,49 @@ class DarkChessGame : public Game {
   absl::optional<double> UtilitySum() const override { return DrawUtility(); }
   double MaxUtility() const override { return WinUtility(); }
   std::vector<int> ObservationTensorShape() const override {
-    std::vector<int> shape{
-        (13 +  // public boards:  piece types * colours + empty
-         14)   // private boards: piece types * colours + empty + unknown
-            * board_size_ * board_size_ +
-        3 +    // public: repetitions count, one-hot encoding
-        2 +    // public: side to play
-        1 +    // public: irreversible move counter -- a fraction of $n over 100
-        2 * 2  // private: left/right castling rights, one-hot encoded.
+
+    return {
+      chess::kMaxBoardSize, chess::kMaxBoardSize,
+      6 + // Player pieces
+      6 + // Opponent pieces
+      1 + // Empty tile
+      1 + // Unknown tile
+      1 // 3 public: repetitions count in one-hot encoding, 2 public: side to play, 1 public: irreversible move counter -- a fraction of $n over 100, 4 private: left/right castling rights, one-hot encoded. In the dark chess original this require only 10 tiles, so we will have some overhead
     };
-    return shape;
+
+    // std::vector<int> shape{
+    //     (13 +  // public boards:  piece types * colours + empty
+    //      14)   // private boards: piece types * colours + empty + unknown
+    //         * board_size_ * board_size_ +
+    //     3 +    // public: repetitions count, one-hot encoding
+    //     2 +    // public: side to play
+    //     1 +    // public: irreversible move counter -- a fraction of $n over 100
+    //     2 * 2  // private: left/right castling rights, one-hot encoded.
+    // };
+    // return shape;
   }
 
-  std::vector<int> StateTensorShape() const override {
+  std::vector<int> StateTensorShape() const override { 
     return {
-      (13 /* piece types * colours + empty */ + 1 /* repetition count */ +
-          1 /* side to move */ + 1 /* irreversible move counter */ +
-          4 /* castling rights */) * chess::kMaxBoardSize * chess::kMaxBoardSize}; // Taken from chess.h
+      chess::kMaxBoardSize, chess::kMaxBoardSize,
+      6 + // Player pieces
+      6 + // Opponent pieces
+      1 + // Empty tile
+      // 1 + // Unknown tile not necessary in state tensor
+      1 // 3 public: repetitions count in one-hot encoding, 2 public: side to play, 1 public: irreversible move counter -- a fraction of $n over 100, 4 private: left/right castling rights, one-hot encoded. In the dark chess original this require only 10 tiles, so we will have some overhead
+      };
+      // (13 /* piece types * colours + empty */ + 1 /* repetition count */ +
+      //     1 /* side to move */ + 1 /* irreversible move counter */ +
+      //     4 /* castling rights */) * chess::kMaxBoardSize * chess::kMaxBoardSize}; // Taken from chess.h
   }
+
+  // Taken from chess.h
+  // std::vector<int> StateTensorShape() const override {
+  //   return {
+  //     (13 /* piece types * colours + empty */ + 1 /* repetition count */ +
+  //         1 /* side to move */ + 1 /* irreversible move counter */ +
+  //         4 /* castling rights */) * chess::kMaxBoardSize * chess::kMaxBoardSize}; // Taken from chess.h
+  // }
 
   int MaxGameLength() const override { return chess::MaxGameLength(); }
   std::shared_ptr<Observer> MakeObserver(

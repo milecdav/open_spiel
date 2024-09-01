@@ -69,7 +69,8 @@ chess::ObservationTable ComputePrivateInfoTable(
           chess::Square en_passant_capture =
               move.to + chess::Offset{0, reversed_y_direction};
           size_t index = chess::SquareToIndex(en_passant_capture, board_size);
-          if (!public_info_table[index]) observability_table[index] = true;
+          // if (!public_info_table[index]) observability_table[index] = true;
+          observability_table[index] = true;
         }
         return true;
       },
@@ -81,7 +82,8 @@ chess::ObservationTable ComputePrivateInfoTable(
       const auto& piece = board.at(sq);
       if (piece.color == color) {
         size_t index = chess::SquareToIndex(sq, board_size);
-        if (!public_info_table[index]) observability_table[index] = true;
+        // if (!public_info_table[index]) observability_table[index] = true;
+        observability_table[index] = true;
       }
     }
   }
@@ -308,7 +310,7 @@ class DarkChessObserver : public Observer {
 
     const auto public_info_table = ComputePublicInfoTable(state.Board());
 
-    if (iig_obs_type_.public_info) {
+    if (iig_obs_type_.public_info && iig_obs_type_.private_info != PrivateInfoType::kSinglePlayer) {
       WritePublicInfoTensor(state, public_info_table, allocator);
     }
     if (iig_obs_type_.private_info == PrivateInfoType::kSinglePlayer) {
@@ -373,10 +375,32 @@ class DarkChessObserver : public Observer {
             piece_on_board.color == color &&
             piece_on_board.type == piece_type &&
             observability_table[chess::SquareToIndex(square, board_size)];
-        out.at(x, y) = write_square ? 1.0f : 0.0f;
+        out.at(y, x) = write_square ? 1.0f : 0.0f;
       }
     }
   }
+
+  void WriteLastSeenPieces(chess::Color color, chess::PieceType piece_type,
+    const std::array<int, 64> last_seen_piece,
+    const std::string& prefix, Allocator* allocator) const  {
+    const std::string type_string =  chess::PieceTypeToString(
+                  piece_type,
+                  /*uppercase=*/color == chess::Color::kWhite);
+    const int board_size = 8;
+    const int max_memory = 40;
+    auto out = allocator->Get(prefix + "_" + type_string + "_last_seen_pieces",
+                              {board_size, board_size});
+    
+    for (int8_t y = 0; y < board_size; ++y) {
+      for (int8_t x = 0; x < board_size; ++x) {
+        const chess::Square square{x, y};
+        int clamped_last_seen = last_seen_piece[chess::SquareToIndex(square, board_size)] < 0 ? max_memory : last_seen_piece[chess::SquareToIndex(square, board_size)];
+        clamped_last_seen = std::min(clamped_last_seen, max_memory);
+        out.at(y, x) = (max_memory - clamped_last_seen) / (float) max_memory;
+      }
+    }
+  }
+
 
   void WriteUnknownSquares(const chess::ChessBoard& board,
                            chess::ObservationTable& observability_table,
@@ -390,7 +414,7 @@ class DarkChessObserver : public Observer {
         const chess::Square square{x, y};
         const bool write_square =
             observability_table[chess::SquareToIndex(square, board_size)];
-        out.at(x, y) = write_square ? 0.0f : 1.0f;
+        out.at(y, x) = write_square ? 0.0f : 1.0f;
       }
     }
   }
@@ -414,28 +438,55 @@ class DarkChessObserver : public Observer {
                               const chess::ObservationTable& public_info_table,
                               int player, const std::string& prefix,
                               Allocator* allocator) const {
+    const auto entry = state.repetitions_.find(state.Board().HashValue());
+    SPIEL_CHECK_FALSE(entry == state.repetitions_.end());
+    int repetitions = entry->second;
     chess::Color color = chess::PlayerToColor(player);
     chess::ObservationTable private_info_table =
         ComputePrivateInfoTable(state.Board(), color, public_info_table);
 
     // Piece configuration.
     for (const chess::PieceType& piece_type : chess::kPieceTypes) {
-      WritePieces(chess::Color::kWhite, piece_type, state.Board(),
+      if (color == chess::Color::kWhite) {
+        WritePieces(chess::Color::kWhite, piece_type, state.Board(),
+                          private_info_table, prefix, allocator);
+        WriteLastSeenPieces(chess::Color::kBlack, piece_type, state.LastSeenPiece(chess::Color::kBlack, piece_type), prefix, allocator);
+      }
+      else {
+        WriteLastSeenPieces(chess::Color::kWhite, piece_type, state.LastSeenPiece(chess::Color::kWhite, piece_type), prefix, allocator);
+        WritePieces(chess::Color::kBlack, piece_type, state.Board(),
                   private_info_table, prefix, allocator);
-      WritePieces(chess::Color::kBlack, piece_type, state.Board(),
-                  private_info_table, prefix, allocator);
+      }
     }
     WritePieces(chess::Color::kEmpty, chess::PieceType::kEmpty, state.Board(),
                 private_info_table, prefix, allocator);
     WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
-    // Castling rights.
-    WriteBinary(
-        state.Board().CastlingRight(color, chess::CastlingDirection::kLeft),
-        prefix + "_left_castling", allocator);
-    WriteBinary(
-        state.Board().CastlingRight(color, chess::CastlingDirection::kRight),
-        prefix + "_right_castling", allocator);
+  
+    for (int i = 0; i < 3; ++i){ 
+      // TODO(kubicon) This is changed to correspond to the state tensor representation
+      // Num repetitions for the current board in one-hot.
+      WriteScalar(/*val=*/repetitions, /*min=*/1, /*max=*/6, "repetitions" + std::to_string(i),
+                  allocator);
+
+      // Side to play.
+      WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
+                  /*min=*/0, /*max=*/1, "side_to_play"  + std::to_string(i), allocator);
+    }
+    
+    // Just to fill out the space
+    auto out = allocator->Get("fill", {8});
+
+    int color_offset = 6 * chess::ToInt(color);
+      // Castling rights.
+    for (int i =0 ; i < 2; ++i) {
+      WriteScalar(
+          state.Board().CastlingRight(color, chess::CastlingDirection::kLeft) + color_offset, 0, 7,
+          prefix + "_left_castling" + std::to_string(i), allocator);
+      WriteScalar(
+          state.Board().CastlingRight(color, chess::CastlingDirection::kRight) + color_offset, 0, 7,
+          prefix + "_right_castling" + std::to_string(i), allocator);
+    }
   }
 
   void WritePublicInfoTensor(const DarkChessState& state,
@@ -478,7 +529,29 @@ DarkChessState::DarkChessState(std::shared_ptr<const Game> game, int board_size,
       start_board_(*chess::ChessBoard::BoardFromFEN(fen, board_size, true)),
       current_board_(start_board_) {
   SPIEL_CHECK_TRUE(&current_board_);
+  SPIEL_CHECK_EQ(8, board_size);
   repetitions_[current_board_.HashValue()] = 1;
+  last_seen_ = std::array<std::array<std::array<int, 64>, 6>, 2>();
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 6; ++j) {
+      for (int k = 0; k < 64; ++k) {
+        last_seen_[i][j][k] = -1;
+      }
+    }
+  }
+
+  // TODO(kubicon) Move this to a separate function for DRY.
+  for (int8_t y = 0; y < 8; ++y) {
+    for (int8_t x = 0; x < 8; ++x) {
+      chess::Square sq{x, y};
+      chess::Piece piece = current_board_.at(sq);
+      if (piece.color != chess::Color::kEmpty) {
+        int piece_type = (int) piece.type;
+        SPIEL_CHECK_GT(piece_type, 0); // Piece cannot be empty
+        last_seen_[ToInt(piece.color)][piece_type - 1][chess::SquareToIndex(sq, 8)] = 0;
+      }
+    }
+  }
 }
 
 void DarkChessState::DoApplyAction(Action action) {
@@ -486,6 +559,46 @@ void DarkChessState::DoApplyAction(Action action) {
   moves_history_.push_back(move);
   Board().ApplyMove(move);
   ++repetitions_[current_board_.HashValue()];
+
+  // TODO(kubicon): This is here just for RNaD training.
+  const auto public_info_table = ComputePublicInfoTable(Board());
+
+  // We update the last seen by saying that each previously seen piece is moved 1 turn forward
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 6; ++j) {
+      for (int k = 0; k < 64; ++k) {
+        if (last_seen_[i][j][k] != -1) {
+          last_seen_[i][j][k]++;
+        }
+      }
+    }
+  }
+
+  
+  for (int pl = 0; pl < 2; ++pl) {
+    chess::Color color = chess::PlayerToColor(pl);
+    chess::ObservationTable private_info_table =
+        ComputePrivateInfoTable(Board(), color, public_info_table);
+    // If we still see a piece we update it 
+    for (int y = 0; y < chess::kMaxBoardSize; ++y) {
+      for (int x = 0; x < chess::kMaxBoardSize; ++x) {
+        chess::Square sq{x, y};
+        int board_index = chess::SquareToIndex(sq, 8);
+        if (!(public_info_table[board_index] || private_info_table[board_index])) {
+          continue;
+        }
+        chess::Piece piece = Board().at(sq);
+        // Only opponents pieces are updated
+        if (piece.color != chess::Color::kEmpty && piece.color != color) {
+          int piece_type = (int) piece.type;
+          SPIEL_CHECK_GT(piece_type, 0); // Piece cannot be empty
+          last_seen_[ToInt(piece.color)][piece_type - 1][board_index] = 0;
+        }
+      }
+    }
+  }
+
+
   cached_legal_actions_.reset();
 }
 
@@ -549,30 +662,81 @@ void DarkChessState::StateTensor(absl::Span<float> values) const {
   const auto entry = repetitions_.find(Board().HashValue());
   SPIEL_CHECK_FALSE(entry == repetitions_.end());
   int repetitions = entry->second;
+  int player_to_play = ColorToPlayer(Board().ToPlay());
+  // int irreversible_move_counter = Board().IrreversibleMoveCounter(); // Just way too complicated to be useful in the game
+  int white_left_castle = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft);
+  int white_right_castle = Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight);
+  int black_left_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft);
+  int black_right_castle = Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight);
+
+  // Num repetitions of the current board
+  for (int j = 0; j < 3; ++j){
+    for (int i = 0; i < 3; ++i) {
+      *value_it++ = (repetitions == i + 1) ? 1 : 0;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+      *value_it++ = 0;
+    } 
+
+
+    for (int i = 0; i < 2; ++i) {
+      *value_it++ = (player_to_play == i) ? 1 : 0;
+    }
+  }
+  for (int i = 0; i < 8; ++i) {
+    *value_it++ = 0;
+  }
+
+  for (int j = 0; j < 2; ++j) {
+    for (int i = 0; i < 2; ++i) {
+      *value_it++ = (white_left_castle == i) ? 1 : 0;
+    }
+  
+    for (int i = 0; i < 4; ++i) {
+      *value_it++ = 0;
+    }
+ 
+    for (int i = 0; i < 2; ++i) {
+      *value_it++ = (black_left_castle == i) ? 1 : 0;
+    }
+    for (int i = 0; i < 2; ++i) {
+      *value_it++ = (white_right_castle == i) ? 1 : 0;
+    }
+    
+    for (int i = 0; i < 4; ++i) {
+      *value_it++ = 0;
+    }
+
+    for (int i = 0; i < 2; ++i) {
+      *value_it++ = (black_right_castle == i) ? 1 : 0;
+    }
+  }
+
 
   // Num repetitions for the current board.
-  AddScalarPlane(repetitions, 1, 3, value_it);
+  // AddScalarPlane(repetitions, 1, 3, value_it);
 
-  // Side to play.
-  AddScalarPlane(ColorToPlayer(Board().ToPlay()), 0, 1, value_it);
+  // // Side to play.
+  // AddScalarPlane(ColorToPlayer(Board().ToPlay()), 0, 1, value_it);
 
-  // Irreversible move counter.
-  AddScalarPlane(Board().IrreversibleMoveCounter(), 0, 101, value_it);
+  // // Irreversible move counter.
+  // AddScalarPlane(Board().IrreversibleMoveCounter(), 0, 101, value_it);
 
-  // Castling rights.
-  AddBinaryPlane(Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft),
-                 value_it);
+  // // Castling rights.
+  // AddBinaryPlane(Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kLeft),
+  //                value_it);
 
-  AddBinaryPlane(
-      Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight),
-      value_it);
+  // AddBinaryPlane(
+  //     Board().CastlingRight(chess::Color::kWhite, chess::CastlingDirection::kRight),
+  //     value_it);
 
-  AddBinaryPlane(Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft),
-                 value_it);
+  // AddBinaryPlane(Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kLeft),
+  //                value_it);
 
-  AddBinaryPlane(
-      Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight),
-      value_it);
+  // AddBinaryPlane(
+  //     Board().CastlingRight(chess::Color::kBlack, chess::CastlingDirection::kRight),
+  //     value_it);
 
   SPIEL_CHECK_EQ(value_it, values.end());
 }
