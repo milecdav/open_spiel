@@ -38,6 +38,7 @@ from multiprocessing.managers import BaseManager
 
 from pyinstrument import Profiler
 
+import pickle
 import contextlib
         
 class ParallelWrapper():
@@ -1364,7 +1365,7 @@ class RNaDSolver(policy_lib.Policy):
     })
     return logs
   
-  def parallel_steps(self, num_steps: int):
+  def parallel_steps(self, num_steps: int, save_each: int, save_folder: str):
     
   
     profiler = Profiler()
@@ -1372,7 +1373,7 @@ class RNaDSolver(policy_lib.Policy):
     
     start_time = time.time()
     mp.set_start_method('spawn', force=True)
-    num_threads = 31
+    num_threads = 7
     BaseManager.register('ParallelWrapper', ParallelWrapper)
     manager = BaseManager()
     
@@ -1394,7 +1395,8 @@ class RNaDSolver(policy_lib.Policy):
       p.daemon = True
       p.start()
       # print("Started")
-    
+    start = time.time()
+    print_iter_time = time.time()
     for step in range(num_steps):
       while queue.empty():
         pass
@@ -1425,6 +1427,19 @@ class RNaDSolver(policy_lib.Policy):
       self.mvs_optimizer, self.mvs_optimizer_target), mvs_logs = self.update_mvs_params(self.mvs_params,
           self.mvs_params_target, self.params, self.transformation_params, self.mvs_optimizer,
           self.mvs_optimizer_target, timestep)
+      
+      if step % save_each == 0:
+        file = "/rnad_" + str(self.config.seed) + "_" + str(step) + ".pkl"
+        file_path = save_folder + file
+        with open(file_path, "wb") as f:
+          # print(solver.mvs_params)
+          pickle.dump(self, f)
+        print("Saved at iteration", step, "after", int(time.time() - start), flush=True)
+
+      if time.time() > print_iter_time:
+        print("Iteration ", step, flush=True)
+
+        print_iter_time = time.time() + 60 * 60
       # print("Done iteration")
     
     

@@ -107,9 +107,51 @@ def train():
   print(profiler.output_text(color=True, unicode=True))
   i+= 1 
       
-     
+
+def parallel_train():
+  args = parser.parse_args([] if "__file__" not in globals() else None)
+  game_name = "dark_chess" 
+ 
+  save_folder = "sepot_networks/dark_chess"
+  if not os.path.exists(save_folder):
+    os.makedirs(save_folder)
+  
+  max_trajectory = 120
+  rnad_config = rnad.RNaDConfig(
+      game_name = game_name, 
+      game_params = tuple(),
+      trajectory_max =  max_trajectory,
+      # policy_network_layers = args.rnad_network_layers,
+      # mvs_network_layers = args.mvs_network_layers,
+      # transformation_network_layers = args.transformation_network_layers,
+      
+      batch_size = args.batch_size,
+      learning_rate = args.learning_rate,
+      entropy_schedule_repeats = args.entropy_schedule_repeats,
+      entropy_schedule_size = args.entropy_schedule,
+      c_vtrace = args.c_vtrace,
+      rho_vtrace = args.rho_vtrace,
+      eta_reward_transform = args.eta,
+
+      num_transformations = args.num_transformations,
+      matrix_valued_states = True,
+      seed=  args.seed,
+      state_representation = rnad.StateRepresentation.OBSERVATION
+  )
+  i = 0
+
+  solver =  rnad.RNaDSolver(rnad_config)
+  
+  profiler = Profiler()
+  profiler.start()
+  
+  solver.parallel_steps(args.iterations, args.save_each, save_folder)
+  profiler.stop()
+  print(profiler.output_text(color=True, unicode=True))
+  i+= 1 
+  
 
 
 if __name__ == "__main__":
-  train()
+  parallel_train()
   
