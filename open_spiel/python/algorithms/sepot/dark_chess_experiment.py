@@ -17,6 +17,8 @@ import argparse
 import numpy as np
 import pickle
 
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
 import time
 
 import open_spiel.python.algorithms.sepot.rnad_sepot_dark_chess as rnad
