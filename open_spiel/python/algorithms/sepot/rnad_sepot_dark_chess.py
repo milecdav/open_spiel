@@ -1787,8 +1787,8 @@ def state_as_env_step(state: pyspiel.State, ex_state: pyspiel.State, representat
 
   # TODO(author16): clarify the story around rewards and valid.
   return EnvStep(
-      obs=np.array(obs.reshape(15, 8, 8), dtype=np.float64),
-      state=np.array(state.state_tensor().reshape(14, 8, 8), dtype=np.float64),
+      obs=np.transpose(np.array(obs, dtype=np.float64).reshape(15, 8, 8), (1, 2, 0)),
+      state=np.transpose(np.array(state.state_tensor(), dtype=np.float64).reshape(14, 8, 8), (1, 2, 0)),
       legal=np.array(state.legal_actions_mask(), dtype=np.int8),
       player_id=np.array(state.current_player(), dtype=np.float64),
       valid=np.array(valid, dtype=np.float64),
