@@ -1821,7 +1821,8 @@ def collect_trajectories(config, params_wrapper, queue, rng_key, np_rng):
   distinct_actions = game.num_distinct_actions()
   
   ex_state = play_chance(game.new_initial_state(), np_rng)
-  network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
+  network = RNaDNetwork(distinct_actions, 2048, [[5, 128], [5, 256]])
+  # network = RNaDNetwork(distinct_actions, tuple(config.policy_network_layers))
   # print("Initalized thread")
   while True:
     if not params_wrapper.is_sampling():
