@@ -109,6 +109,42 @@ def train():
   print(profiler.output_text(color=True, unicode=True))
   i+= 1 
       
+ 
+
+def cont_train():
+  args = parser.parse_args([] if "__file__" not in globals() else None)
+  game_name = "dark_chess" 
+ 
+  save_folder = "sepot_networks/dark_chess"
+  
+  with open("sepot_networks/dark_chess/rnad_666321_10000.pkl", "rb") as f:
+    solver = pickle.load(f)
+  
+  start = time.time()
+  print_iter_time = time.time() # We will save the model in first step
+  profiler = Profiler()
+  profiler.start()
+  for iteration in range(i, args.iterations + i):
+    solver.step()
+    # print(iteration, flush=True)
+    if iteration % args.save_each == 0:
+        
+      file = "/rnad_" + str(args.seed) + "_" + str(iteration) + ".pkl"
+      file_path = save_folder + file
+      with open(file_path, "wb") as f:
+        # print(solver.mvs_params)
+        pickle.dump(solver, f)
+      print("Saved at iteration", iteration, "after", int(time.time() - start), flush=True)
+
+    # Prints time each hour
+    if time.time() > print_iter_time:
+      print("Iteration ", iteration, flush=True)
+
+      print_iter_time = time.time() + 60 * 60
+  profiler.stop()
+  print(profiler.output_text(color=True, unicode=True))
+  i+= 1 
+           
 
 def parallel_train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
@@ -155,5 +191,5 @@ def parallel_train():
 
 
 if __name__ == "__main__":
-  parallel_train()
+  cont_train()
   
