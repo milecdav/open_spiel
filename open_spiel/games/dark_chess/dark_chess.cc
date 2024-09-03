@@ -428,6 +428,13 @@ class DarkChessObserver : public Observer {
     out.at(val - min) = 1;
   }
 
+  void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor) const {
+    SPIEL_DCHECK_LE(val, max);
+    for (int i = 0; i < max; i++) {
+      val > i ? tensor.at(i + offset + 8) = 1.0f : tensor.at(i + offset) = 1.0f;
+    }
+  }
+
   // Adds a binary scalar plane.
   void WriteBinary(bool val, const std::string& field_name,
                    Allocator* allocator) const {
@@ -462,31 +469,51 @@ class DarkChessObserver : public Observer {
                 private_info_table, prefix, allocator);
     WriteUnknownSquares(state.Board(), private_info_table, prefix, allocator);
 
-  
-    for (int i = 0; i < 3; ++i){ 
-      // TODO(kubicon) This is changed to correspond to the state tensor representation
-      // Num repetitions for the current board in one-hot.
-      WriteScalar(/*val=*/repetitions, /*min=*/1, /*max=*/6, "repetitions" + std::to_string(i),
-                  allocator);
+    // TODO(kubicon) We do not need the king, because if it is not there, you have Already won. But just to have consistent representation.
+    std::array<int, 6> pieces_on_board = {0};
 
-      // Side to play.
-      WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
-                  /*min=*/0, /*max=*/1, "side_to_play"  + std::to_string(i), allocator);
+    for (int8_t y = 0; y < state.BoardSize(); ++y) {
+      for (int8_t x = 0; x < state.BoardSize(); ++x) {
+        const chess::Square square{x, y};
+        const chess::Piece& piece_on_board = state.Board().at(square);
+        int piece_type = (int) piece_on_board.type;
+        if (piece_on_board.color != color && piece_on_board.type > chess::PieceType::kEmpty) {
+          pieces_on_board[piece_type - 1]++; // We do not care about empty tiles
+        }
+      }
     }
-    
+    SPIEL_CHECK_EQ(pieces_on_board[0], 1); // King has to be there!
+
+    auto out = allocator->Get("Remaining pieces", {32}); // Each of the pieces is either there or not.
+
+    // 1 king, 1 queen, 2 rooks, 2 bishops, 2 knights, 8 pawns
+    WritePiecesAlive(pieces_on_board[0], 1, 0, out);
+    WritePiecesAlive(pieces_on_board[1], 1, 1, out);
+    WritePiecesAlive(pieces_on_board[2], 2, 2, out);
+    WritePiecesAlive(pieces_on_board[3], 2, 4, out);
+    WritePiecesAlive(pieces_on_board[4], 2, 6, out);
+    WritePiecesAlive(pieces_on_board[5], 8, 16, out); 
+
     // Just to fill out the space
-    auto out = allocator->Get("fill", {8});
+    out = allocator->Get("fill", {8});
 
+    // TODO(kubicon) This is changed to correspond to the state tensor representation
+    // Num repetitions for the current board in one-hot.
+    WriteScalar(/*val=*/repetitions, /*min=*/1, /*max=*/6, "repetitions",
+                allocator);
+
+    // Side to play.
+    WriteScalar(/*val=*/ColorToPlayer(state.Board().ToPlay()),
+                /*min=*/0, /*max=*/1, "side_to_play", allocator);
+  
     int color_offset = 6 * chess::ToInt(color);
-      // Castling rights.
-    for (int i =0 ; i < 2; ++i) {
-      WriteScalar(
-          state.Board().CastlingRight(color, chess::CastlingDirection::kLeft) + color_offset, 0, 7,
-          prefix + "_left_castling" + std::to_string(i), allocator);
-      WriteScalar(
-          state.Board().CastlingRight(color, chess::CastlingDirection::kRight) + color_offset, 0, 7,
-          prefix + "_right_castling" + std::to_string(i), allocator);
-    }
+    // Castling rights.
+    WriteScalar(
+        state.Board().CastlingRight(color, chess::CastlingDirection::kLeft) + color_offset, 0, 7,
+        prefix + "_left_castling", allocator);
+    WriteScalar(
+        state.Board().CastlingRight(color, chess::CastlingDirection::kRight) + color_offset, 0, 7,
+        prefix + "_right_castling", allocator);
   }
 
   void WritePublicInfoTensor(const DarkChessState& state,
