@@ -19,7 +19,7 @@ import pickle
 
 import time
 
-import open_spiel.python.algorithms.sepot.rnad_sepot_dark_chess as rnad
+import open_spiel.python.algorithms.sepot.rnad_sepot_battleship as rnad
 
 from open_spiel.python.algorithms.get_all_states import get_all_states
 from pyinstrument import Profiler
@@ -47,20 +47,40 @@ parser.add_argument("--eta", default=0.2, type=float, help="Regularization term"
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of both players")
 
 # Game Setting 
+parser.add_argument("--height", default=7, type=int, help="Goofspiel cards")
+parser.add_argument("--width", default=7, type=int, help="Goofspiel cards")
+parser.add_argument("--ships", default=[4, 3, 3, 2], nargs="+", type=int, help="Ship sizes")
 
 
 def train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  game_name = "dark_chess" 
+  
+  
+  shots = args.width * args.height
+  ship_values = ";".join(["1" for _ in args.ships])
+  ships = "s".join([str(ship) for ship in args.ships])
+  ship_sizes = "[" + ";".join([str(ship) for ship in args.ships]) + "]"
+  ship_values = "[" + ship_values + "]"
+  game_name = "battleship" 
+  game_params = (
+      ("board_height", args.height),
+      ("board_width", args.width),
+      ("num_shots", shots),
+      ("ship_sizes", ship_sizes),
+      ("ship_values", ship_values),
+      ("allow_repeated_shots", False)
+      )
+  path = "void_networks/battleship_" + str(args.height) + "x" + str(args.width) +  "_" + ships 
+  max_trajectory = 2 * (shots + len(ship_sizes)) - 1
+    
  
-  save_folder = "sepot_networks/dark_chess"
+  save_folder = "sepot_networks/battleship_" + str(args.height) + "x" + str(args.width) +  "_" + ships 
   if not os.path.exists(save_folder):
     os.makedirs(save_folder)
   
-  max_trajectory = 100
   rnad_config = rnad.RNaDConfig(
       game_name = game_name, 
-      game_params = tuple(),
+      game_params = game_params,
       trajectory_max =  max_trajectory,
       # policy_network_layers = args.rnad_network_layers,
       # mvs_network_layers = args.mvs_network_layers,
@@ -77,7 +97,7 @@ def train():
       num_transformations = args.num_transformations,
       matrix_valued_states = True,
       seed=  args.seed,
-      state_representation = rnad.StateRepresentation.OBSERVATION
+      state_representation = rnad.StateRepresentation.INFO_SET
   )
   i = 0
 
@@ -111,11 +131,11 @@ def train():
 
 def cont_train():
   args = parser.parse_args([] if "__file__" not in globals() else None)
-  game_name = "dark_chess" 
  
-  save_folder = "sepot_networks/dark_chess"
+  ships = "s".join([str(ship) for ship in args.ships])
+  save_folder = "sepot_networks/battleship_" + str(args.height) + "x" + str(args.width) +  "_" + ships 
   
-  with open("sepot_networks/dark_chess/rnad_666321_10000.pkl", "rb") as f:
+  with open( save_folder + "/rnad_666321_10000.pkl", "rb") as f:
     solver = pickle.load(f)
   
   start = time.time()
@@ -189,5 +209,5 @@ def parallel_train():
 
 
 if __name__ == "__main__":
-  cont_train()
+  train()
   
