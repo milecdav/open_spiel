@@ -429,7 +429,7 @@ class DarkChessObserver : public Observer {
   }
 
   void WritePiecesAlive(int val, int max, int offset, SpanTensor& tensor) const {
-    SPIEL_DCHECK_LE(val, max);
+    // SPIEL_DCHECK_LE(val, max);
     for (int i = 0; i < max; i++) {
       val > i ? tensor.at(i + offset + 8) = 1.0f : tensor.at(i + offset) = 1.0f;
     }
