@@ -115,13 +115,16 @@ def cont_train():
  
   save_folder = "sepot_networks/dark_chess"
   
-  with open("sepot_networks/dark_chess/rnad_666321_10000.pkl", "rb") as f:
+  file = "sepot_networks/dark_chess/rnad_666321_10000.pkl"
+  
+  with open(file, "rb") as f:
     solver = pickle.load(f)
   
   start = time.time()
   print_iter_time = time.time() # We will save the model in first step
   profiler = Profiler()
   profiler.start()
+  i = int(file.split("_")[-1][:-4])
   for iteration in range(i, args.iterations + i):
     solver.step()
     # print(iteration, flush=True)
