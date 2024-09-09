@@ -85,6 +85,7 @@ class LeducState : public State {
                               absl::Span<float> values) const override;
   void ObservationTensor(Player player,
                          absl::Span<float> values) const override;
+  void StateTensor(absl::Span<float> values) const override;
   std::unique_ptr<State> Clone() const override;
   // The probability of taking each possible action in a particular info state.
   std::vector<std::pair<Action, double>> ChanceOutcomes() const override;
@@ -213,6 +214,7 @@ class LeducGame : public Game {
   absl::optional<double> UtilitySum() const override { return 0; }
   std::vector<int> InformationStateTensorShape() const override;
   std::vector<int> ObservationTensorShape() const override;
+  std::vector<int> StateTensorShape() const override;
   constexpr int MaxBetsPerRound() const {
     // E.g. longest round for 4-player is 10 bets:
     //   check, check, check, bet, call, call, raise, call, call, call
@@ -237,6 +239,7 @@ class LeducGame : public Game {
   // Used to implement the old observation API.
   std::shared_ptr<LeducObserver> default_observer_;
   std::shared_ptr<LeducObserver> info_state_observer_;
+  std::shared_ptr<LeducObserver> state_observer_;
 
  private:
   int num_players_;  // Number of players.

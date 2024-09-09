@@ -96,6 +96,14 @@ class LeducObserver : public Observer {
   // These helper methods each write a piece of the tensor observation.
   //
 
+  static void WriteCurrentPlayer(const LeducState& state, Allocator* allocator) {
+  auto out = allocator->Get("player", {state.num_players_});
+   if (!state.IsChanceNode() && !state.IsTerminal()) {
+    out.at(state.CurrentPlayer()) = 1;
+   }
+  }
+
+
   // Identity of the observing player. One-hot vector of size num_players.
   static void WriteObservingPlayer(const LeducState& state, int player,
                                    Allocator* allocator) {
@@ -161,6 +169,16 @@ class LeducObserver : public Observer {
     }
   }
 
+  // Write whether the game finished by folding  shape=[num_players].
+  static void WriteFolding(const LeducState& state,
+                                   Allocator* allocator) {
+    auto out = allocator->Get("folding", {state.num_players_});
+    for (auto p = Player{0}; p < state.num_players_; p++) {
+      out.at(p) = state.folded_[p] ? 1. : 0.;
+    }
+  }
+
+
   // Writes the complete observation in tensor form.
   // The supplied allocator is responsible for providing memory to write the
   // observation into.
@@ -169,6 +187,18 @@ class LeducObserver : public Observer {
     auto& state = open_spiel::down_cast<const LeducState&>(observed_state);
     SPIEL_CHECK_GE(player, 0);
     SPIEL_CHECK_LT(player, state.num_players_);
+
+
+    if (iig_obs_type_.public_info && iig_obs_type_.perfect_recall && iig_obs_type_.private_info == PrivateInfoType::kAllPlayers) {
+      WriteCurrentPlayer(state, allocator);
+      WriteAllPlayerCards(state, allocator);
+      WriteCommunityCard(state, allocator);
+      // WriteDealingInitialCard(state, allocator);
+      WriteBettingSequence(state, allocator);
+      WriteFolding(state, allocator);
+      return;
+    }
+    // Obs
 
     // Observing player.
     WriteObservingPlayer(state, player, allocator);
@@ -530,6 +560,13 @@ void LeducState::ObservationTensor(Player player,
   game.default_observer_->WriteTensor(*this, player, &allocator);
 }
 
+void LeducState::StateTensor(absl::Span<float> values) const {
+  ContiguousAllocator allocator(values);
+  const LeducGame& game = open_spiel::down_cast<const LeducGame&>(*game_);
+  game.state_observer_->WriteTensor(*this, 0, &allocator);
+}
+
+
 std::unique_ptr<State> LeducState::Clone() const {
   return std::unique_ptr<State>(new LeducState(*this));
 }
@@ -782,6 +819,7 @@ LeducGame::LeducGame(const GameParameters& params)
   SPIEL_CHECK_LE(num_players_, kGameType.max_num_players);
   default_observer_ = std::make_shared<LeducObserver>(kDefaultObsType);
   info_state_observer_ = std::make_shared<LeducObserver>(kInfoStateObsType);
+  state_observer_ = std::make_shared<LeducObserver>(kStateObsType);
 }
 
 std::unique_ptr<State> LeducGame::NewInitialState() const {
@@ -818,6 +856,16 @@ std::vector<int> LeducGame::ObservationTensorShape() const {
   } else {
     return {(num_players_) + (total_cards_ * 2) + (num_players_)};
   }
+}
+
+std::vector<int> LeducGame::StateTensorShape() const {
+  // One-hot encoding for player number (who is to play).
+  // One-hot encoding each private card for each player
+  // One-hot for public card
+  // Sequence encoding. 2 bits for each action.
+  // One-hot for each player if folded
+  return {num_players_ + total_cards_ * (1 + suit_isomorphism_) * num_players_ + total_cards_ + MaxGameLength() * 2 + num_players_};
+
 }
 
 double LeducGame::MaxUtility() const {
