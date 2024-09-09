@@ -82,9 +82,9 @@ def train():
       game_name = game_name, 
       game_params = game_params,
       trajectory_max =  max_trajectory,
-      # policy_network_layers = args.rnad_network_layers,
-      # mvs_network_layers = args.mvs_network_layers,
-      # transformation_network_layers = args.transformation_network_layers,
+      policy_network_layers = args.rnad_network_layers,
+      mvs_network_layers = args.mvs_network_layers,
+      transformation_network_layers = args.transformation_network_layers,
       
       batch_size = args.batch_size,
       learning_rate = args.learning_rate,
