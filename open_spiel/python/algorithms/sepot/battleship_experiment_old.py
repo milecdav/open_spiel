@@ -124,7 +124,7 @@ def train():
 
       print_iter_time = time.time() + 60 * 60
   profiler.stop()
-  print(profiler.output_text(color=True, unicode=True))
+  print(profiler.output_text(color=False, unicode=False))
   i+= 1 
       
  
