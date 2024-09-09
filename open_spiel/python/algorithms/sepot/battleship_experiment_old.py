@@ -41,7 +41,7 @@ parser.add_argument("--rnad_network_layers", default=[256, 256], nargs="+", type
 parser.add_argument("--mvs_network_layers", default=[256, 256], nargs="+", type=int, help="Network layers")
 parser.add_argument("--transformation_network_layers", default=[256, 256], nargs="+", type=int, help="Network layers")
 parser.add_argument("--learning_rate", default=3e-4, type=float, help="Learning Rate")
-parser.add_argument("--c_vtrace", default=10.0, type=float, help="Clipping of vtrace")
+parser.add_argument("--c_vtrace", default=np.inf, type=float, help="Clipping of vtrace")
 parser.add_argument("--rho_vtrace", default=np.inf, type=float, help="Clipping of vtrace")
 parser.add_argument("--eta", default=0.2, type=float, help="Regularization term")
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of both players")
