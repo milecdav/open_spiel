@@ -39,6 +39,26 @@ def take_policy_from_rnad(solver: rnad.RNaDSolver) -> policy.TabularPolicy:
     pass
   return rnad_pols
 
+def take_policy_from_rnad_at_once(solver: SePoT_RNaD) -> policy.TabularPolicy:
+  game = solver._game
+  rnad_pols = policy.TabularPolicy(game)
+  all_states = get_all_states.get_all_states(
+    game,
+    depth_limit=-1,
+    include_terminals=False,
+    include_chance_states=False,
+    stop_if_encountered=False,
+    to_string=lambda s: s.information_state_string())
+
+  rollout = jax.vmap(solver.network.apply, (None, 0), 0)
+  env_steps = [solver._state_as_env_step(all_states[iset]) for iset in rnad_pols.state_lookup]
+  pi, v, log_pi, logit = rollout(solver.params_target, jax.tree_util.tree_map(lambda *e: jnp.stack(e, axis=0), *env_steps))
+  for iset_i, iset in enumerate(rnad_pols.state_lookup):
+    state_policy = rnad_pols.policy_for_key(iset)
+    for i in range(len(state_policy)):
+      state_policy[i] = pi[iset_i, i]
+  return rnad_pols
+    
 
 def take_policy_from_mvs(solver: SePoT_RNaD) -> policy.TabularPolicy:
   
@@ -57,20 +77,21 @@ def take_policy_from_mvs(solver: SePoT_RNaD) -> policy.TabularPolicy:
       new_s.apply_action(action)
       traverse_tree(new_s, player, depth + 1)
   
-  traverse_tree(solver.rnad._game.new_initial_state(), 0, 0)
-  
-  for depth, states_in_depth in enumerate(states_per_depth):
-    for state in states_in_depth:
-      if state.current_player() != 0 or state.information_state_string() in solver.policy:
-        continue
-      avg_policy = solver.compute_policy(state, 0)
-      if depth == 0:
-        print(avg_policy)
-      for iset, temp_policy in avg_policy.items():
-        solver.policy[iset] = temp_policy
-        tab_policy_pat = tab_policy.policy_for_key(iset)
-        for action, prob in enumerate(temp_policy):
-          tab_policy_pat[action] = prob
+  for pl in range(2):
+    traverse_tree(solver.rnad._game.new_initial_state(), pl, 0)
+    
+    for depth, states_in_depth in enumerate(states_per_depth):
+      for state in states_in_depth:
+        if state.current_player() != pl or state.information_state_string() in solver.policy:
+          continue
+        avg_policy = solver.compute_policy(state, pl)
+        # if depth == 0:
+          # print(avg_policy)
+        for iset, temp_policy in avg_policy.items():
+          solver.policy[iset] = temp_policy
+          tab_policy_pat = tab_policy.policy_for_key(iset)
+          for action, prob in enumerate(temp_policy):
+            tab_policy_pat[action] = prob
   return tab_policy
 
 def resolve_first_subgame_then_rnad(solver: SePoT_RNaD) -> policy.TabularPolicy:
