@@ -42,6 +42,13 @@ class ChildSelectionPolicy(enum.Enum):
   PUCT = 2
   # GUMBEL = 3
 
+class RootSelectionPolicy(enum.Enum):
+  """A enumeration class for root selection in ISMCTS."""
+  UCT = 1
+  PUCT = 2
+  NETWORK = 3
+  UNIFORM = 4
+  
 
 class ChildInfo(object):
   """Child node information for the search tree."""
@@ -78,7 +85,10 @@ class ISMCTSBot(pyspiel.Bot):
                final_policy_type=ISMCTSFinalPolicyType.MAX_VISIT_COUNT,
                use_observation_string=False,
                allow_inconsistent_action_sets=False,
-               child_selection_policy=ChildSelectionPolicy.PUCT):
+               child_selection_policy=ChildSelectionPolicy.PUCT,
+               root_selection_policy=RootSelectionPolicy.UNIFORM,
+              #  player=0
+               ):
 
     pyspiel.Bot.__init__(self)
     self._game = game
@@ -95,6 +105,7 @@ class ISMCTSBot(pyspiel.Bot):
     self._random_state = random_state or np.random.RandomState()
     self._child_selection_policy = child_selection_policy
     self._resampler_cb = None
+    self._root_selection_policy = root_selection_policy
 
   def random_number(self):
     return self._random_state.uniform()
@@ -143,13 +154,13 @@ class ISMCTSBot(pyspiel.Bot):
           
         temp_state.apply_action(action)
       root_probs.append(prob)
-      
-    root_probs = np.array(root_probs)
-    root_probs = root_probs / np.sum(root_probs)
-      # temp_state =
-    
+    self._root_samples = root_states
     # TODO(kubicon) find the probabilities from previous runs
+    # Right now the probabilities are just taken from the policy of the network, this means that if the policy was changed in the past due to pruning, it is not reflected here!
     # probabilites = np.full((len(root_states)), 1.0 / len(root_states))
+    root_probs = np.array(root_probs)
+    root_probs = root_probs / np.sum(root_probs) # Normalization, because they do not sum to 1
+    
     
     for _ in range(self._max_simulations):
       # how to sample a pyspiel.state from another pyspiel.state?
@@ -287,6 +298,48 @@ class ISMCTSBot(pyspiel.Bot):
     else:
       return self.select_action(node)
 
+  def select_root_policy(self):
+    if self._root_selection_policy == RootSelectionPolicy.UNIFORM:
+      return self._random_state.choice(list(self._root_node.child_info.keys()))
+    elif self._root_selection_policy == RootSelectionPolicy.NETWORK:
+      policy = self._evaluator.get_policy(self._root_samples[0]) # All states in root should be the same infoset.
+      return self._random_state.choice(len(policy), p=policy)
+    else:
+      candidates = []
+      max_value = -float('inf')
+      for action, child in self._root_node.child_info.items():
+        assert child.visits > 0
+
+        action_value = child.value()
+        if self._root_selection_policy == RootSelectionPolicy.UCT:
+          action_value += (self._uct_c *
+                          np.sqrt(np.log(self._root_node.total_visits)/child.visits))
+        elif self._root_selection_policy == RootSelectionPolicy.PUCT:
+          action_value += (self._uct_c * child.prior *
+                          np.sqrt(self._root_node.total_visits)/(1 + child.visits))
+        else:
+          raise pyspiel.SpielError('Child selection policy unrecognized.')
+        if action_value > max_value + TIE_TOLERANCE:
+          candidates = [action]
+          max_value = action_value
+        elif (action_value > max_value - TIE_TOLERANCE and
+              action_value < max_value + TIE_TOLERANCE):
+          candidates.append(action)
+          max_value = action_value
+
+      assert len(candidates) >= 1
+      return candidates[self._random_state.randint(len(candidates))]
+      
+  def select_non_root_policy(self, state, node):
+    # For the resolving player we use the network policy
+    if state.current_player() == self._root_samples[0].current_player():
+      policy = self._evaluator.get_policy(state)
+      return self._random_state.choice(len(policy), p=policy)
+    # For opponent we just do the usual MCTS selection 
+    else:
+      return self.select_action_tree_policy(node, state.legal_actions())
+    
+
   def select_action(self, node):
       
     candidates = []
@@ -348,20 +401,17 @@ class ISMCTSBot(pyspiel.Bot):
       chosen_action = self.check_expand(
           node, legal_actions)  # add one children at a time?
       if chosen_action != pyspiel.INVALID_ACTION:
-        # check if all actions have been expanded, if not, select one?
-        # if yes, ucb?
+        # check if all actions have been expanded, if not, select one
         self.expand_if_necessary(node, chosen_action)
       else:
-        chosen_action = self.select_action_tree_policy(node, legal_actions)
-        # if is_root or state.current_player() != self._evaluator.player:
-        #   chosen_action = self.select_action_tree_policy(node, legal_actions)
-        # else:
-        #   assert state.current_player() != self._evaluator.player # This is to ensure that each bot uses its own evaluator and they do not mix-up
-        #   policy = self._evaluator.get_policy(state)
-          
-        #   chosen_action = self._random_state.choice(legal_actions, p=policy)
+        # chosen_action = self.select_action_tree_policy(node, legal_actions)
+        if is_root:
+          chosen_action = self.select_root_policy()
+        else:
+          chosen_action = self.select_non_root_policy(state, node)
 
       assert chosen_action != pyspiel.INVALID_ACTION
+    
 
       node.total_visits += 1
       node.child_info[chosen_action].visits += 1
