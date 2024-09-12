@@ -14,6 +14,7 @@ from open_spiel.python.algorithms.is_mcts.ismcts import ISMCTSBot, ChildSelectio
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR
 from open_spiel.python.algorithms.sepot.utils import evaluate_policy_both
 from open_spiel.python.algorithms.is_mcts.test_network_expl import get_rnad_policy
+from open_spiel.python.algorithms.sepot.rnad_sepot import RNaDSolver
 
 
 import pyspiel
@@ -24,45 +25,58 @@ from open_spiel.python.algorithms.sequence_form_lp import solve_zero_sum_game
 # class RnadType(enum.Enum):
   
 
-class ISMCTSPruneEvaluator(Evaluator):
+class ICMTSRNaDEvaluator(Evaluator):
   def __init__(self,
-               rnad_network: str,
-               player: int) -> None:
-    with open(rnad_network, "rb") as f:
-      self.rnad = pickle.load(f)
-    self.player = player
-    
+               rnad: RNaDSolver,
+               player: int,
+               keep_cache: bool = False) -> None:
+    self._rnad = rnad
+    self._player = player
+    self._keep_cache = keep_cache
+    self._cache = {}
   
   def evaluate(self, state):
     """Returns evaluation on given from the infoset network."""
-    assert self.player >= 0
-    envs = [self.rnad._state_as_env_step(state)]  
+    assert self._player >= 0
+    envs = [self._rnad._state_as_env_step(state)]  
     _, v, _, _ = self.call_network(envs)
-    
+    v = np.asarray(v[0])
     if state.current_player() == 0:
-      return v[0], -v[0]
+      return v, -v
     else:
-      return -v[0], v[0]
+      return -v, v
     
   def prior(self, state):
     """For player that is acting it just outputs the policy of the network, for the other player it outputs uniform policy."""
-    assert self.player >= 0
+    assert self._player >= 0
     policy = self.get_policy(state)
     policy = [(a, policy[a]) for a in state.legal_actions()]
     return policy
 
   def get_policy(self, state):
     """For player that is acting it just outputs the policy of the network, for the other player it outputs uniform policy."""
-    assert self.player >= 0
-    envs = [self.rnad._state_as_env_step(state)]  
+    assert self._player >= 0
+    
+    if self._keep_cache and state.information_state_string() in self._cache:
+      return self._cache[state.information_state_string()]
+    
+    envs = [self._rnad._state_as_env_step(state)]  
     # pi = pi[0] / jnp.sum(pi[0])
     pi, _, _, _ = self.call_network(envs)
-    return pi[0]
+    pi = np.asarray(pi[0])
+    pi = pi / np.sum(pi)
+    
+    if self._keep_cache:
+      self._cache[state.information_state_string()] = pi
+      
+    return pi
   
   @functools.partial(jax.jit, static_argnums=(0,))
   def call_network(self, env_state):
-    rollout = jax.vmap(self.rnad.network.apply, (None, 0), 0)
-    return rollout(self.rnad.params_target, jax.tree_util.tree_map(lambda *e: jnp.stack(e, axis=0), *env_state))
+    rollout = jax.vmap(self._rnad.network.apply, (None, 0), 0)
+    return rollout(self._rnad.params_target, jax.tree_util.tree_map(lambda *e: jnp.stack(e, axis=0), *env_state))
+  
+  
 class Resampler():
   def __init__(self) -> None:
     iset_map = {}
@@ -151,8 +165,8 @@ def test():
 def game_play_test():
   
   file_name = "sepot_networks/battleship_5x5_3s2s2/rnad_7357_0.pkl"
-  evaluator1 = ISMCTSPruneEvaluator(file_name, 0)
-  evaluator2 = ISMCTSPruneEvaluator(file_name, 1)
+  evaluator1 = ICMTSRNaDEvaluator(file_name, 0)
+  evaluator2 = ICMTSRNaDEvaluator(file_name, 1)
   np_rng1 = np.random.RandomState(1234)
   np_rng2 = np.random.RandomState(1542)
   jnp_rng = jax.random.PRNGKey(1234)
