@@ -149,6 +149,7 @@ class ISMCTSBot(pyspiel.Bot):
       for action in root_state.history():
         if temp_state.current_player() >= 0:
           prob *= self._evaluator.get_policy(temp_state)[action]
+        # TODO(kubicon) What to do with chance nodes? I guess we could just use it, as it is.
         if temp_state.is_chance_node():
           assert False
           
@@ -160,14 +161,19 @@ class ISMCTSBot(pyspiel.Bot):
     # probabilites = np.full((len(root_states)), 1.0 / len(root_states))
     root_probs = np.array(root_probs)
     root_probs = root_probs / np.sum(root_probs) # Normalization, because they do not sum to 1
+    self._root_probs = root_probs
     
-    
+    self.action_vals = []
     for _ in range(self._max_simulations):
       # how to sample a pyspiel.state from another pyspiel.state?
       sampled_root_state = self._random_state.choice(root_states, p=root_probs).clone()
       assert root_infostate_key == self.get_state_key(sampled_root_state)
       assert sampled_root_state
       self.run_simulation(sampled_root_state, True)
+      action_values = np.zeros(len(sampled_root_state.legal_actions_mask()))
+      for a, child in self._root_node.child_info.items():
+        action_values[a] = child.value()
+      self.action_vals.append(action_values)
 
     if self._allow_inconsistent_action_sets:  # when this happens?
       legal_actions = state.legal_actions()
@@ -398,8 +404,9 @@ class ISMCTSBot(pyspiel.Bot):
         node.prior_map[action] = prob
       return self._evaluator.evaluate(state)
     else:
+      # Checks whether there is a node that needs expansion. If yes it returns the action to expand otherwise InvalidAction
       chosen_action = self.check_expand(
-          node, legal_actions)  # add one children at a time?
+          node, legal_actions)
       if chosen_action != pyspiel.INVALID_ACTION:
         # check if all actions have been expanded, if not, select one
         self.expand_if_necessary(node, chosen_action)
