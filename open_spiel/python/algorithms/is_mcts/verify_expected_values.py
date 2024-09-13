@@ -30,11 +30,15 @@ def verify_expected_values():
   folder = "sepot_plots/goofspiel_5_descending"
   if not os.path.exists(folder):
     os.makedirs(folder)
+    
+  # To disable visiting the same infoset twice, since it is quite useless computation
+  visited_set = set()
   # Goes through the game tree, when arriving to a player node, it first runs the MCTS to get the values of the children, then it computes the real expected values for each action (rnad vs br policy)
   def traverse_tree(state: pyspiel.State, player: int):
     if state.is_terminal():
       return
-    if state.current_player() == player:
+    if state.current_player() == player and state.information_state_string() not in visited_set:
+      visited_set.add(state.information_state_string())
       mcts_bot.step(state)
       mcts_values = np.zeros(len(state.legal_actions_mask()))
       expected_values = np.zeros(len(state.legal_actions_mask()))
