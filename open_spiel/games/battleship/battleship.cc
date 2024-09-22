@@ -607,23 +607,25 @@ void BattleshipState::InformationStateTensor(
     SPIEL_CHECK_LE(offset, values.size());
   }
   else {
-
-    SPIEL_CHECK_EQ(values.size(), game_->StateTensorSize());
+    SPIEL_CHECK_GE(player, 0);
+    SPIEL_CHECK_LT(player, num_players_);
+    SPIEL_CHECK_EQ(values.size(), game_->InformationStateTensorSize());
     std::fill(values.begin(), values.end(), 0);
 
     int offset = 0;
     const BattleshipConfiguration& conf = bs_game_->conf;
     const int height = conf.board_height;
     const int width = conf.board_width;
-    // std::vector<int> ship_damage(conf.ships.size(), 0);
-    // std::vector<bool> cell_hit(conf.board_width * conf.board_height, false);
-    std::array<std::vector<int>, 2> ship_damage = {std::vector<int>(conf.ships.size(), 0), std::vector<int>(conf.ships.size(), 0)};
-    std::array<std::vector<bool>, 2> cell_hit = {std::vector<bool>(conf.board_width * conf.board_height, false), std::vector<bool>(conf.board_width * conf.board_height, false)};
+    std::vector<int> ship_damage(conf.ships.size(), 0);
+    std::vector<bool> cell_hit(conf.board_width * conf.board_height, false);
 
     if (IsTerminal()) {
       values[offset] = 1;
     }
     offset += 1;
+
+    values[offset + player] = 1;
+    offset += 2;
 
     if (!IsTerminal()) {
       values[offset + CurrentPlayer()] = 1;
@@ -632,18 +634,21 @@ void BattleshipState::InformationStateTensor(
 
     for (const auto& move : moves_) {
       if (absl::holds_alternative<ShipPlacement>(move.action)) {
-        const ShipPlacement& placement = absl::get<ShipPlacement>(move.action);
-        if (placement.direction == CellAndDirection::Horizontal) {
-          values[offset] = 1;
-        } else {
-          values[offset + 1] = 1;
-        }
-        offset += 2;
+        // The player observed *their own* ship placements.
+        if (move.player == player) {
+          const ShipPlacement& placement = absl::get<ShipPlacement>(move.action);
+          if (placement.direction == CellAndDirection::Horizontal) {
+            values[offset] = 1;
+          } else {
+            values[offset + 1] = 1;
+          }
+          offset += 2;
 
-        values[offset + placement.TopLeftCorner().row] = 1;
-        offset += height;
-        values[offset + placement.TopLeftCorner().col] = 1;
-        offset += width;
+          values[offset + placement.TopLeftCorner().row] = 1;
+          offset += height;
+          values[offset + placement.TopLeftCorner().col] = 1;
+          offset += width;
+        }
       } else {
         const Player opponent = (move.player == Player{0}) ? Player{1} : Player{0};
         const Shot& shot = absl::get<Shot>(move.action);
@@ -670,13 +675,13 @@ void BattleshipState::InformationStateTensor(
               FindShipPlacement(ship, opponent);
 
           if (ship_placement.CoversCell(shot)) {
-            if (!cell_hit[move.player][cell_index]) {
+            if (!cell_hit[cell_index]) {
               // This is a new hit: we have to increas the ship damage and
               // mark the cell as already hit.
-              ++ship_damage[move.player].at(ship_index);
-              cell_hit[move.player].at(cell_index) = true;
+              ++ship_damage.at(ship_index);
+              cell_hit.at(cell_index) = true;
             }
-            if (ship_damage[move.player].at(ship_index) == ship.length) {
+            if (ship_damage.at(ship_index) == ship.length) {
               shot_outcome = 'S';  // For 'sunk'.
             } else {
               shot_outcome = 'H';  // For 'hit' (but not sunk).
