@@ -50,13 +50,21 @@ class Node {
     
 };
 
-void GoThroughTree(std::unique_ptr<open_spiel::State> state)  {
+int GetSample(std::unique_ptr<open_spiel::State> state) {
+  while(!state->IsTerminal()) {
+    state->ApplyAction(state->LegalActions()[0]);
+  }
+  return state->Rewards()[0];
+}
+
+void GoThroughTree(std::unique_ptr<open_spiel::State> state, int &terminal_count)  {
   if(state->IsTerminal()) {
     float reward = state->Rewards()[0];
+    terminal_count++;
     return;
   }
   for(open_spiel::Action action : state->LegalActions()) {
-    GoThroughTree(state->Child(action));
+    GoThroughTree(state->Child(action), terminal_count);
   }
 }
 // Example code for using CFR+ to solve Kuhn Poker.
@@ -66,11 +74,11 @@ int main(int argc, char** argv) {
 
   const std::shared_ptr<const open_spiel::Game> game =
         open_spiel::LoadGame("battleship", {
-                                {"board_width", open_spiel::GameParameter(3)},
-                                {"board_height", open_spiel::GameParameter(2)},
-                                {"ship_sizes", open_spiel::GameParameter("[1]")},
-                                {"ship_values", open_spiel::GameParameter("[1]")},
-                                {"num_shots", open_spiel::GameParameter(4)},
+                                {"board_width", open_spiel::GameParameter(5)},
+                                {"board_height", open_spiel::GameParameter(5)},
+                                {"ship_sizes", open_spiel::GameParameter("[2;2]")},
+                                {"ship_values", open_spiel::GameParameter("[1;1]")},
+                                {"num_shots", open_spiel::GameParameter(25)},
                                 {"allow_repeated_shots", open_spiel::GameParameter(false)},
                                 {"loss_multiplier", open_spiel::GameParameter(1.0)}});
   std::cout << game->GetType().utility << "\n";
@@ -79,7 +87,9 @@ int main(int argc, char** argv) {
   // Part where I measure time
   for(int i = 0; i < 10; i++) {
     auto start = std::chrono::high_resolution_clock::now();
-    GoThroughTree(state->Clone());
+    for(int iSample = 0; iSample < 100000; iSample++) {
+      GetSample(state->Clone());
+    }
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
     std::cout << "Elapsed time: " << duration.count() << "\n";
