@@ -16,6 +16,8 @@ ml SciPy-bundle/2023.07-gfbf-2023a
 ml Abseil/20230125.3-GCCcore-12.3.0
 ml pybind11/2.11.1-GCCcore-12.3.0
 
+git pull
+
 cd build
 
 cmake .
