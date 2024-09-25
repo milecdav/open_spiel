@@ -21,9 +21,31 @@
 #include "open_spiel/spiel.h"
 #include "open_spiel/spiel_utils.h"
 
+enum NodeType {
+  PLAYER,
+  OPPONENT,
+  TERMINAL,
+  MAVS
+}; 
+
 class Node {
-    public:
-        Node() {}
+  public:
+    Node() {}
+
+    NodeType GetNodeType() const {
+      return type;
+    }
+
+    float value GetValue() const {
+      return value;
+    }
+
+  private:
+    std::vector<Node> children;
+    std::vector<std::string> actionLabels;
+    float value;
+    NodeType type;
+    
 };
 
 // Example code for using CFR+ to solve Kuhn Poker.
@@ -36,5 +58,7 @@ int main(int argc, char** argv) {
                                 {"num_shots", open_spiel::GameParameter(1000)},
                                 {"allow_repeated_shots", open_spiel::GameParameter(false)},
                                 {"loss_multiplier", open_spiel::GameParameter(1.0)}});
-        std::cout << game->GetType().utility << "\n";
+  std::cout << game->GetType().utility << "\n";
+  game->
+
 }
