@@ -77,6 +77,17 @@ class SampleStrategy {
     virtual open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) = 0;
 };
 
+class SampleStrategyUniform : public SampleStrategy {
+  public:
+    open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
+      open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+      for(int iAction = 0; iAction < actions.size(); iAction++) {
+        actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+      }
+      return actionsAndProbs;
+    }
+};
+
 class SampleStrategyLowToHigh : public SampleStrategy {
   public:
     open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
@@ -107,9 +118,104 @@ class SampleStrategyNotLow : public SampleStrategy {
         return actionsAndProbs;
       }
       open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+      if(actions.size() == 1) {
+        actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], 1.);
+        return actionsAndProbs;
+      }
       actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], 0.);
       for(int iAction = 1; iAction < actions.size(); iAction++) {
         actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./(actions.size()-1));
+      }
+      return actionsAndProbs;
+    }
+};
+
+class SampleStrategyNotHigh : public SampleStrategy {
+  public:
+    open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
+      if(placingShips) {
+        open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+        for(int iAction = 0; iAction < actions.size(); iAction++) {
+          actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+        }
+        return actionsAndProbs;
+      }
+      open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+      if(actions.size() == 1) {
+        actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], 1.);
+        return actionsAndProbs;
+      }
+      actionsAndProbs[actions.size() - 1] = std::pair<open_spiel::Action, float>(actions.back(), 0.);
+      for(int iAction = 1; iAction < actions.size(); iAction++) {
+        actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./(actions.size()-1));
+      }
+      return actionsAndProbs;
+    }
+};
+
+class SampleStrategyShootEven : public SampleStrategy {
+  public:
+    open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
+      if(placingShips) {
+        open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+        for(int iAction = 0; iAction < actions.size(); iAction++) {
+          actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+        }
+        return actionsAndProbs;
+      }
+      open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+      int numEven = 0;
+      for(int iAction = 1; iAction < actions.size(); iAction++) {
+        if(actions[iAction] % 2 == 0) {
+          numEven++;
+        }
+      }
+      if(numEven > 0) {
+        for(int iAction = 1; iAction < actions.size(); iAction++) {
+          if(actions[iAction] % 2 == 0) {
+            actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./numEven);
+          } else {
+            actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 0.);
+          }
+        }      
+      } else {
+        for(int iAction = 0; iAction < actions.size(); iAction++) {
+          actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+        }
+      }
+      return actionsAndProbs;
+    }
+};
+
+class SampleStrategyShootOdd : public SampleStrategy {
+  public:
+    open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
+      if(placingShips) {
+        open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+        for(int iAction = 0; iAction < actions.size(); iAction++) {
+          actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+        }
+        return actionsAndProbs;
+      }
+      open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
+      int numOdd = 0;
+      for(int iAction = 1; iAction < actions.size(); iAction++) {
+        if(actions[iAction] % 2 == 1) {
+          numOdd++;
+        }
+      }
+      if(numOdd > 0) {
+        for(int iAction = 1; iAction < actions.size(); iAction++) {
+          if(actions[iAction] % 2 == 1) {
+            actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./numOdd);
+          } else {
+            actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 0.);
+          }
+        }      
+      } else {
+        for(int iAction = 0; iAction < actions.size(); iAction++) {
+          actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./actions.size());
+        }
       }
       return actionsAndProbs;
     }
@@ -170,16 +276,19 @@ void GoThroughTree(std::shared_ptr<Node> node, int &terminal_count, int &nonterm
 }
 
 float OneSample(std::unique_ptr<open_spiel::State> state, std::shared_ptr<SampleStrategy>& playerStrategy, SampleStrategy& opponentStrategy, open_spiel::Player player) {
+  int depth = 0;
   while(true) {
     open_spiel::Player currentPlayer = state->CurrentPlayer();
     if(currentPlayer == open_spiel::kTerminalPlayerId) {
       return state->Rewards()[0];
     }
+    bool ship_placement = depth < 2;
     if(currentPlayer == player) {
-      state->ApplyAction(open_spiel::SampleAction(playerStrategy->GetActionsAndProbs(state->LegalActions(), false), rng_).first);
+      state->ApplyAction(open_spiel::SampleAction(playerStrategy->GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
     } else {
-      state->ApplyAction(open_spiel::SampleAction(opponentStrategy.GetActionsAndProbs(state->LegalActions(), false), rng_).first);
+      state->ApplyAction(open_spiel::SampleAction(opponentStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
     }
+    depth++;
   }
 }
 
@@ -259,6 +368,59 @@ std::pair<open_spiel::Action, float> GetBestResponse(std::shared_ptr<Node> root,
   return {bestAction, bestValue};
 }
 
+float PlayGame(std::unique_ptr<open_spiel::State> state, SampleStrategy& playerStrategy, SampleStrategy& opponentStrategy, open_spiel::Player player) {
+  int depth = 0;
+  while(true) {
+    open_spiel::Player currentPlayer = state->CurrentPlayer();
+    if(currentPlayer == open_spiel::kTerminalPlayerId) {
+      return state->Rewards()[0];
+    }
+    bool ship_placement = depth < 3;
+    if(currentPlayer == player) {
+      state->ApplyAction(open_spiel::SampleAction(playerStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
+    } else {
+      state->ApplyAction(open_spiel::SampleAction(opponentStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
+    }
+    depth++;
+  }
+}
+
+std::vector<float> PlayMatch(std::unique_ptr<open_spiel::State> state, SampleStrategy& playerStrategy, SampleStrategy& opponentStrategy, int numGames) {
+  std::vector<float> results(numGames);
+  for(int iGame = 0; iGame < numGames; iGame++) {
+    results[iGame] = PlayGame(state->Clone(), playerStrategy, opponentStrategy, open_spiel::Player{0});
+  }
+  return results;
+}
+
+float Variance(std::vector<float>& vec) {
+  const size_t sz = vec.size();
+  if (sz <= 1) {
+    return 0.0;
+  }
+
+  // Calculate the mean
+  const float mean = std::accumulate(vec.begin(), vec.end(), 0.0) / sz;
+
+  // Now calculate the variance
+  auto variance_func = [&mean, &sz](float accumulator, const float& val) {
+      return accumulator + ((val - mean)*(val - mean) / (sz - 1));
+  };
+
+  return std::accumulate(vec.begin(), vec.end(), 0.0, variance_func);
+}
+
+float Mean(std::vector<float>& vec) {
+  const size_t sz = vec.size();
+  if (sz <= 1) {
+    return 0.0;
+  }
+
+  // Calculate the mean
+  return std::accumulate(vec.begin(), vec.end(), 0.0) / sz;
+}
+
+
 // Example code for using CFR+ to solve Kuhn Poker.
 int main(int argc, char** argv) {
   int depth_limit = 2;
@@ -268,8 +430,8 @@ int main(int argc, char** argv) {
         open_spiel::LoadGame("battleship", {
                                 {"board_width", open_spiel::GameParameter(5)},
                                 {"board_height", open_spiel::GameParameter(5)},
-                                {"ship_sizes", open_spiel::GameParameter("[2]")},
-                                {"ship_values", open_spiel::GameParameter("[1]")},
+                                {"ship_sizes", open_spiel::GameParameter("[2;2]")},
+                                {"ship_values", open_spiel::GameParameter("[1;1]")},
                                 {"num_shots", open_spiel::GameParameter(25)},
                                 {"allow_repeated_shots", open_spiel::GameParameter(false)},
                                 {"loss_multiplier", open_spiel::GameParameter(1.0)}});
@@ -283,12 +445,22 @@ int main(int argc, char** argv) {
   std::cout << "Terminals: " << terminal_count << "\n";
   std::cout << "NonTerminals: " << nonterminal_count << "\n";
   std::vector<std::shared_ptr<SampleStrategy>> playerStrategies;
-  playerStrategies.push_back(std::make_shared<SampleStrategyLowToHigh>());
+  playerStrategies.push_back(std::make_shared<SampleStrategyNotLow>());
+  playerStrategies.push_back(std::make_shared<SampleStrategyNotHigh>());
   SampleStrategyNotLow opponentStrategy = SampleStrategyNotLow();
+  auto start = std::chrono::high_resolution_clock::now();
   CrawlTreeAndSample(root, playerStrategies, opponentStrategy, open_spiel::Player{0});
   std::cout << "Sampled\n";
   std::pair<open_spiel::Action, float> bestResponse = GetBestResponse(root, opponentStrategy);
-
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+  std::cout << "Elapsed time: " << duration.count() << "\n";
+  std::cout << "Starting match: " << std::endl;
+  SampleStrategyUniform uniformStrategy = SampleStrategyUniform();
+  std::vector<float> results = PlayMatch(state->Child(bestResponse.first), uniformStrategy, opponentStrategy, 100);
+  std::cout << "Winrate: " << Mean(results) << " with variance " << Variance(results) << std::endl;
+  results = PlayMatch(state->Clone(), uniformStrategy, opponentStrategy, 10000);
+  std::cout << "Winrate: " << Mean(results) << " with variance " << Variance(results) << std::endl;
   // Part where I measure time
   // for(int i = 0; i < 10; i++) {
   //   auto start = std::chrono::high_resolution_clock::now();
