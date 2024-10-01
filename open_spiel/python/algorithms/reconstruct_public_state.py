@@ -13,51 +13,37 @@
 # limitations under the License.
 
 
+import enum
 import pyspiel
 import copy
 import numpy as np
 from ortools.sat.python import cp_model
 
-
-def reconstruct_states_from_histories(init_state, histories):
-  states = []
-  for h in histories:
-    state = init_state.clone()
-    for a in h:
-      state.apply_action(a)
-    states.append(state)
-  return states
-
-def reconstruct_goofspiel(state: pyspiel.State, limit: int):
-  # TOOD: What about turn-based goofspiel
-  assert state.is_chance_node() == False
-  turn_outcomes = []
-  player_bets = []
-  num_cards = state.get_game().num_distinct_actions()
-  prev_action = -1
-  full_h = state.full_history()
-  for h in state.full_history():
-    if h.player == 0:
-      prev_action = h.action
-      player_bets.append(h.action)
-    elif h.player == 1:
-      turn_outcomes.append(1 if h.action < prev_action else -1 if h.action > prev_action else 0)
-  histories, construct_subgame = reconstruct_public_state_goofspiel(turn_outcomes, player_bets, num_cards, limit)
-  # print(state.current_player())
-  if state.current_player() == 0:
-    return histories, construct_subgame
-  new_histories = []
-  for history in histories:
-    for a in range(state.get_game().num_distinct_actions()):
-      if a not in history[::2]:
-        new_history = copy.copy(history)
-        new_history.append(a)
-        new_histories.append(new_history)
-  return new_histories, construct_subgame
+class ReconstructType(enum.Enum):
+  """A enumeration class for children selection in ISMCTS."""
+  INFOSET = 0
+  PUBLIC_STATE = 1
   
 
+def reconstruct_states(state: pyspiel.State, limit: int = 0, reconstruct_type: ReconstructType = ReconstructType.PUBLIC_STATE, player: int = 0):
+  histories, premature_stop = reconstruct(state, limit, reconstruct_type, player)
+  return reconstruct_states_from_histories(state.get_game().new_initial_state(), histories), premature_stop
 
-def reconstruct_public_state_goofspiel(turn_outcomes: list[int], player_bets: list[int], num_cards: int, limit: int = 0):
+# Player is important only when ReconstrudctType is INFOSET
+def reconstruct(state: pyspiel.State, limit: int = 0, reconstruct_type: ReconstructType = ReconstructType.PUBLIC_STATE, player: int = 0):
+  # Could both be turn_based or simultaneous
+  assert player >= 0 or reconstruct_type == ReconstructType.PUBLIC_STATE
+  
+  if "Goofspiel" in state.get_game().get_type().long_name:
+    return reconstruct_goofspiel(state, limit, reconstruct_type, player)
+  elif state.get_game().get_type().short_name == "battleship":
+    return reconstruct_battleship(state, limit, reconstruct_type, player)
+  else:
+    raise NotImplementedError("Reconstruction for this game is not implemented")
+
+def reconstruct_goofspiel_model(turn_outcomes: list[int], player_bets: list[int], num_cards: int, limit, reconstruct_type: ReconstructType, player: int, points_order: list[int] = []):
+  # You always reconstruct after chance node!
+  assert len(points_order) == 0 or len(points_order) == len(turn_outcomes) + 1
   model = cp_model.CpModel()
   game_rounds = len(turn_outcomes)
   limit = limit if limit > 0 else float("inf")
@@ -68,10 +54,14 @@ def reconstruct_public_state_goofspiel(turn_outcomes: list[int], player_bets: li
   model.AddAllDifferent(played_cards[1])
 
   for i, outcome in enumerate(turn_outcomes):
+    # We are only reconstructing infoset so we force the actions of a player
+    if reconstruct_type == ReconstructType.INFOSET:
+      model.Add(played_cards[player][i] == player_bets[i])
+      
     # Tie, both played same card
     if outcome == 0:
       model.Add(played_cards[0][i] == played_cards[1][i])
-      model.Add(played_cards[0][i] == player_bets[i])
+      model.Add(played_cards[0][i] == player_bets[i]) # TODO(kubicon): Duplicate constraint. Does it matter?
     elif outcome == 1:
       model.Add(played_cards[0][i] > played_cards[1][i])
     elif outcome == -1:
@@ -93,8 +83,14 @@ def reconstruct_public_state_goofspiel(turn_outcomes: list[int], player_bets: li
         return
       history = []
       for game_round in range(game_rounds):
+        if points_order:
+          history.append(points_order[game_round])
         history.append(self.Value(played_cards[0][game_round]))
         history.append(self.Value(played_cards[1][game_round]))
+      if points_order:
+        history.append(points_order[-1])
+      if reconstruct_type == ReconstructType.INFOSET and game_rounds < len(player_bets):
+        history.append(player_bets[-1])
       histories.append(history)
 
   solver = cp_model.CpSolver()
@@ -104,10 +100,59 @@ def reconstruct_public_state_goofspiel(turn_outcomes: list[int], player_bets: li
   status = solver.Solve(model, callback)
   # if state
   assert len(histories) <= limit
-  return histories, not callback.premature_stop_search
+  return histories, callback.premature_stop_search
+  
+
+def reconstruct_goofspiel(state: pyspiel.State, limit: int, reconstruct_type: ReconstructType, player: int):#
+  # TOOD: What about turn-based goofspiel
+  # assert state.is_chance_node() == False
+  assert "Goofspiel" in state.get_game().get_type().long_name
+  assert state.current_player() >= 0
+  turn_outcomes = []
+  player_bets = []
+  points_order = []
+  num_cards = state.get_game().num_distinct_actions()
+  prev_action = -1
+  # full_h = state.full_history()
+  for h in state.full_history():
+    if h.player == 0:
+      prev_action = h.action
+    elif h.player == 1:
+      turn_outcomes.append(1 if h.action < prev_action else -1 if h.action > prev_action else 0)
+    elif h.player == -1: # Should be chances
+      points_order.append(h.action)
+    if h.player == player:
+      player_bets.append(h.action)
+      
+  assert len(points_order) >= (state.get_game().get_parameters()["game"]["points_order"] == "random") # If random, then there has to be atleast one chance node played. If not then, then it has to be zero
+  histories, premature_stop = reconstruct_goofspiel_model(turn_outcomes, player_bets, num_cards, limit, reconstruct_type, player, points_order)
+  
+  # TODO(kubicon) this should be completely removed from creating gadget in the code, so remove this.
+  create_cadget = not premature_stop
+  if "Turn-based" not in state.get_game().get_type().long_name or state.current_player() == 0 or (reconstruct_type == ReconstructType.INFOSET and player == 0):
+    return histories, create_cadget
+  tb_histories = []
+  randomized = int(state.get_game().get_parameters()["game"]["points_order"] == "random")
+  for history in histories:
+    for a in range(state.get_game().num_distinct_actions()):
+      if a not in history[randomized::2 + randomized]:
+        new_history = copy.copy(history)
+        new_history.append(a)
+        tb_histories.append(new_history)
+  return tb_histories, create_cadget
+
+def reconstruct_states_from_histories(init_state, histories):
+  states = []
+  for h in histories:
+    state = init_state.clone()
+    for a in h:
+      state.apply_action(a)
+    states.append(state)
+  return states
 
 
-def reconstruct_battleship(state: pyspiel.State, limit: int):
+# TODO(kubicon) does not work when ship is longer than row/column
+def reconstruct_battleship(state: pyspiel.State, limit: int, reconstruct_type: ReconstructType, player: int):
   assert state.get_game().get_type().short_name == "battleship"
   game = state.get_game()
   game_params = game.get_parameters()
@@ -158,20 +203,31 @@ def reconstruct_battleship(state: pyspiel.State, limit: int):
       shots[0, shots[0, :, :] == i + 3] = 2
     if hits[1, i] != ship_sizes[i]:
       shots[1, shots[1, :, :] == i + 3] = 2
-  for player, y, x in zip(*np.nonzero(shots)):
-    shot_result = shots[player, y, x]
-    shot_results[player] = (y * x, shot_result)
+  for pl, y, x in zip(*np.nonzero(shots)):
+    shot_result = shots[pl, y, x]
+    shot_results[pl] = (y * x, shot_result)
   # print(hits)
   # Just reconstruct all possible states for n actions
     
   p1_placed_ships = ship_sizes[:(len(full_history) + 1) // 2]
   p2_placed_ships = ship_sizes[:len(full_history) // 2]
-  p1_histories, construct_subgame = reconstruct_public_state_battleship(board_height, board_width, p1_placed_ships, shots[0])
-  if construct_subgame == False:
-    return [], False
-  p2_histories, construct_subgame = reconstruct_public_state_battleship(board_height, board_width, p2_placed_ships, shots[1])
-  if construct_subgame == False or len(p1_histories) * len(p2_histories) > limit:
-    return [], False
+  if reconstruct_type == ReconstructType.INFOSET:
+    # When finding iset for P1 you go for opponents board 
+    if player == 1:
+      p1_histories, construct_subgame = reconstruct_positions_battleship(board_height, board_width, p1_placed_ships, shots[0], limit)
+      p2_histories = [[h.action for i, h in enumerate(state.full_history()) if h.player == 1 and i < len(ship_sizes) * 2]]
+    else:
+      p1_histories = [[h.action for i,h in enumerate(state.full_history()) if h.player == 0 and i < len(ship_sizes) * 2]]
+      p2_histories, construct_subgame = reconstruct_positions_battleship(board_height, board_width, p2_placed_ships, shots[1], limit)
+  else:
+    p1_histories, construct_subgame = reconstruct_positions_battleship(board_height, board_width, p1_placed_ships, shots[0])
+    if construct_subgame == False:
+      return [], False
+    p2_histories, construct_subgame = reconstruct_positions_battleship(board_height, board_width, p2_placed_ships, shots[1])
+    if construct_subgame == False or len(p1_histories) * len(p2_histories) > limit:
+      return [], False
+  # print(p1_histories)
+  # print(p2_histories)
   histories = []
   for p1_history in p1_histories:
     for p2_history in p2_histories:
@@ -193,7 +249,7 @@ def reconstruct_battleship(state: pyspiel.State, limit: int):
 
 
 
-def reconstruct_public_state_battleship(board_height, board_width, ships, shots, limit: int = 0):
+def reconstruct_positions_battleship(board_height, board_width, ships, shots, limit: int = 0):
   model = cp_model.CpModel()
   limit = limit if limit > 0 else float("inf")
   histories = []
@@ -258,7 +314,7 @@ def reconstruct_public_state_battleship(board_height, board_width, ships, shots,
       model.Add(ship_positions[init_ship_index + next_ship_part] == ship_positions[init_ship_index] + next_ship_part * board_width).OnlyEnforceIf(ship_orientations[ship_id])
       # Invalidates ships that would go to the next row
       for row in range(board_height):
-        model.Add(ship_positions[init_ship_index] != row * board_height - (next_ship_part)).OnlyEnforceIf(ship_orientations[ship_id].Not())
+        model.Add(ship_positions[init_ship_index] != row * board_width - (next_ship_part)).OnlyEnforceIf(ship_orientations[ship_id].Not())
   
   
   class BattleshipSolutionLimitCallback(cp_model.CpSolverSolutionCallback):
@@ -311,4 +367,4 @@ if __name__ == "__main__":
   state.apply_action(4)
   state.apply_action(7)
   state.apply_action(2)
-  reconstruct_battleship(state)
+  reconstruct(state)
