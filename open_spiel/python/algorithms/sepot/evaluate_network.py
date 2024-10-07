@@ -17,16 +17,44 @@ parser = argparse.ArgumentParser()
 # Experiments specific arguments
 
 parser.add_argument("--game_simulations", default=300, type=int, help="Amount of main iterations (each saves model)")
-parser.add_argument("--model_path", default="sepot_networks/dark_chess/rnad_666321", type=str, help="Length of each iteration in seconds")
+parser.add_argument("--model_path", default="sepot_networks/dark_chess/rnad_666321", type=str, help="Length of each iteration in seconds") 
 parser.add_argument("--iterations_range", default=[200000, 210000, 5000], nargs="+", type=int, help="Ship sizes")
  
 parser.add_argument("--seed", default=42, type=int, help="Random seed")
 
+parser.add_argument("--evaluate_type", default="random", type=str, help="Type of evaluation. Could be random or older")
 
-def evaluate_network():
-  """Evaluates a network by playing it against random player."""
-  args = parser.parse_args([] if "__file__" not in globals() else None)
-  assert len(args.iterations_range) == 3
+def evaluate_network_with_older(args):
+  np_rng = np.random.RandomState(args.seed)
+  last_iteration = list(range(*args.iterations_range))[-1]
+  model_to_eval = args.model_path + "_" + str(last_iteration) + ".pkl"
+  with open(model_to_eval, "rb") as f:
+    evaluated_model = pickle.load(f)
+  for i in range(*args.iterations_range):
+    model_path = args.model_path + "_" + str(i) + ".pkl"
+    with open(model_path, "rb") as f:
+      compared_model = pickle.load(f)
+    for player in range(2): # For each player
+      result = []
+      models = [evaluated_model, compared_model] if player == 0 else [compared_model, evaluated_model]
+      for _ in range(args.game_simulations):
+        state = compared_model._game.new_initial_state()
+        while not state.is_terminal(): 
+          if state.current_player() >= 0: 
+            aps = models[state.current_player()].action_probabilities(state)
+            actions, probabilities = [], []
+            for action, probs in aps.items():
+              actions.append(action)
+              probabilities.append(probs)
+            action = np_rng.choice(actions, p=probabilities)
+          else:
+            action = np_rng.choice(state.legal_actions())
+          state.apply_action(action)
+        returns = state.returns()
+        result.append(returns[player])
+      print("Iteration", i, ";Player", player, ";mean:", np.mean(result), ";std:", np.std(result), flush=True)
+  
+def evaluate_network_to_random(args):
   np_rng = np.random.RandomState(args.seed)
   # results = [[], []]
   for i in range(*args.iterations_range):
@@ -51,6 +79,17 @@ def evaluate_network():
         returns = state.returns()
         result.append(returns[player])
       print("Iteration", i, ";Player", player, ";mean:", np.mean(result), ";std:", np.std(result), flush=True)
+
+def evaluate_network():
+  """Evaluates a network by playing it against random player."""
+  args = parser.parse_args([] if "__file__" not in globals() else None)
+  assert len(args.iterations_range) == 3
+  if args.evaluate_type == "random":
+    evaluate_network_to_random()
+  elif args.evaluate_type == "older":
+    evaluate_network_with_older()
+  else:
+    raise ValueError("Unknown evaluate type")
   
   # for _ in range(num_games):
   #   state = game.new_initial_state()
