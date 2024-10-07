@@ -85,9 +85,9 @@ def evaluate_network():
   args = parser.parse_args([] if "__file__" not in globals() else None)
   assert len(args.iterations_range) == 3
   if args.evaluate_type == "random":
-    evaluate_network_to_random()
+    evaluate_network_to_random(args)
   elif args.evaluate_type == "older":
-    evaluate_network_with_older()
+    evaluate_network_with_older(args)
   else:
     raise ValueError("Unknown evaluate type")
   
