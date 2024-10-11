@@ -17,6 +17,10 @@ parser.add_argument("--rho_vtrace", default=np.inf, type=float, help="Clipping o
 parser.add_argument("--eta", default=0.2, type=float, help="Regularization term")
 parser.add_argument("--num_transformations", default=10, type=int, help="Transformations of both players")
 
+parser.add_argument("--iterations", default=100001, type=int, help="Amount of main iterations (each saves model)")
+parser.add_argument("--save_each", default=5000, type=int, help="Length of each iteration in seconds")
+parser.add_argument("--seed", default=42, type=int, help="Random seed")
+
 def main():
   args = parser.parse_args([] if "__file__" not in globals() else None)
 
