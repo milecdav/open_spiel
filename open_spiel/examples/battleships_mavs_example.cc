@@ -23,8 +23,8 @@
 
 #include "chrono"
 
-const int NUM_SAMPLES = 10;
-std::mt19937 rng_(0);
+const int NUM_SAMPLES = 4;
+std::mt19937 rng_(1);
 
 enum NodeType {
   PLAYER,
@@ -109,6 +109,8 @@ class SampleStrategyLowToHigh : public SampleStrategy {
 
 class SampleStrategyNotLow : public SampleStrategy {
   public:
+    SampleStrategyNotLow(float low_prob = 0.) : low_prob(low_prob) {}
+
     open_spiel::ActionsAndProbs GetActionsAndProbs(std::vector<open_spiel::Action> actions, bool placingShips) {
       if(placingShips) {
         open_spiel::ActionsAndProbs actionsAndProbs(actions.size());
@@ -122,12 +124,15 @@ class SampleStrategyNotLow : public SampleStrategy {
         actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], 1.);
         return actionsAndProbs;
       }
-      actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], 0.);
+      actionsAndProbs[0] = std::pair<open_spiel::Action, float>(actions[0], low_prob);
       for(int iAction = 1; iAction < actions.size(); iAction++) {
-        actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], 1./(actions.size()-1));
+        actionsAndProbs[iAction] = std::pair<open_spiel::Action, float>(actions[iAction], (1. - low_prob)/(actions.size()-1));
       }
       return actionsAndProbs;
     }
+
+  private:
+    float low_prob;
 };
 
 class SampleStrategyNotHigh : public SampleStrategy {
@@ -359,7 +364,7 @@ std::pair<open_spiel::Action, float> GetBestResponse(std::shared_ptr<Node> root,
   float bestValue = -1000;
   for(int iAction = 0; iAction < root->actions.size(); iAction++) {
     float actionValue = GetBestResponseValue({root->children[iAction]}, {1.}, opponentStrategy);
-    std::cout << root->actions[iAction] << " " << actionValue << "\n";
+    // std::cout << root->actions[iAction] << " " << actionValue << "\n";
     if(actionValue > bestValue) {
       bestAction = root->actions[iAction];
       bestValue = actionValue;
@@ -377,9 +382,13 @@ float PlayGame(std::unique_ptr<open_spiel::State> state, SampleStrategy& playerS
     }
     bool ship_placement = depth < 3;
     if(currentPlayer == player) {
-      state->ApplyAction(open_spiel::SampleAction(playerStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
+      open_spiel::Action action = open_spiel::SampleAction(playerStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first;
+      // std::cout << "Player action: " <<action << " " << state->ActionToString(action) << std::endl;
+      state->ApplyAction(action);
     } else {
-      state->ApplyAction(open_spiel::SampleAction(opponentStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first);
+      open_spiel::Action action = open_spiel::SampleAction(opponentStrategy.GetActionsAndProbs(state->LegalActions(), ship_placement), rng_).first;
+      // std::cout << "Opponent action: " << action << " " << state->ActionToString(action) << std::endl;
+      state->ApplyAction(action);
     }
     depth++;
   }
@@ -435,32 +444,34 @@ int main(int argc, char** argv) {
                                 {"num_shots", open_spiel::GameParameter(25)},
                                 {"allow_repeated_shots", open_spiel::GameParameter(false)},
                                 {"loss_multiplier", open_spiel::GameParameter(1.0)}});
-  std::cout << game->GetType().utility << "\n";
-  std::unique_ptr<open_spiel::State> state = game->NewInitialState();
 
-  std::shared_ptr<Node> root = BuildUntilDepthLimit(state->Clone(), open_spiel::Player{0}, 2, 0);
-  int terminal_count = 0;
-  int nonterminal_count = 0;
-  GoThroughTree(root, terminal_count, nonterminal_count);
-  std::cout << "Terminals: " << terminal_count << "\n";
-  std::cout << "NonTerminals: " << nonterminal_count << "\n";
   std::vector<std::shared_ptr<SampleStrategy>> playerStrategies;
   playerStrategies.push_back(std::make_shared<SampleStrategyNotLow>());
   playerStrategies.push_back(std::make_shared<SampleStrategyNotHigh>());
-  SampleStrategyNotLow opponentStrategy = SampleStrategyNotLow();
-  auto start = std::chrono::high_resolution_clock::now();
-  CrawlTreeAndSample(root, playerStrategies, opponentStrategy, open_spiel::Player{0});
-  std::cout << "Sampled\n";
-  std::pair<open_spiel::Action, float> bestResponse = GetBestResponse(root, opponentStrategy);
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-  std::cout << "Elapsed time: " << duration.count() << "\n";
-  std::cout << "Starting match: " << std::endl;
   SampleStrategyUniform uniformStrategy = SampleStrategyUniform();
-  std::vector<float> results = PlayMatch(state->Child(bestResponse.first), uniformStrategy, opponentStrategy, 100);
-  std::cout << "Winrate: " << Mean(results) << " with variance " << Variance(results) << std::endl;
-  results = PlayMatch(state->Clone(), uniformStrategy, opponentStrategy, 10000);
-  std::cout << "Winrate: " << Mean(results) << " with variance " << Variance(results) << std::endl;
+  SampleStrategyNotLow opponentStrategy = SampleStrategyNotLow(0.05);
+  SampleStrategyNotLow realOpponentStrategy = SampleStrategyNotLow();
+  std::vector<float> winrates;
+  for(int iMatch = 0; iMatch < 100; iMatch++) {
+    std::unique_ptr<open_spiel::State> state = game->NewInitialState();
+    std::shared_ptr<Node> root = BuildUntilDepthLimit(state->Clone(), open_spiel::Player{0}, 2, 0);
+    auto start = std::chrono::high_resolution_clock::now();
+    CrawlTreeAndSample(root, playerStrategies, opponentStrategy, open_spiel::Player{0});
+    std::pair<open_spiel::Action, float> bestResponse = GetBestResponse(root, opponentStrategy);
+    
+    if(bestResponse.first == 25 or bestResponse.first == 50) {
+      winrates.push_back(1);  
+      std::cout << 1;
+    } else {
+      std::cout << 0;
+      winrates.push_back(0);  
+    }
+    std::cout << std::flush;
+    // std::vector<float> results = PlayMatch(state->Child(bestResponse.first), uniformStrategy, realOpponentStrategy, 100);
+    // std::cout << "Winrate: " << Mean(results) << " with variance " << Variance(results) << std::endl;
+    // winrates.push_back(Mean(results));
+  }
+  std::cout << "Winrate fluctuation: " << Mean(winrates) << " with variance " << Variance(winrates) << std::endl;
   // Part where I measure time
   // for(int i = 0; i < 10; i++) {
   //   auto start = std::chrono::high_resolution_clock::now();
