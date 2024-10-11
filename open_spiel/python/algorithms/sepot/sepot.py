@@ -2,6 +2,7 @@ import pyspiel
 import chex
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 from open_spiel.python.algorithms.sepot.rnad_sepot import RNaDConfig, RNaDSolver
@@ -23,7 +24,7 @@ class SePoTConfig:
   resolve_iterations: int
   subgame_size_limit: int
   subgame_depth_limit: int
-
+  p: float
 
 class SePoT_RNaD:
   def __init__(self, sepot_config: SePoTConfig) -> None:
@@ -33,7 +34,10 @@ class SePoT_RNaD:
 
     self.policy = {}
 
-    
+  def fixed_policy(self, state):
+    policy = state.legal_action_mask()
+    return policy / np.sum(policy)
+
   def reset_policy(self):
     self.policy = {}
     
@@ -50,12 +54,11 @@ class SePoT_RNaD:
       assert False
     if not use_search:
       return self.rnad.action_probabilities(state)
-    states, counterfactual_values, reaches = self.reconstruct_public_belief_state(histories, player)
+    states, counterfactual_values, reaches, fixed_reaches = self.reconstruct_public_belief_state(histories, player)
     
     create_gadget = actions_per_player(state, 1 - player) > 0
     
-    
-    subgame_solver = SePoTCFR(self, states, counterfactual_values, reaches[player], reaches[-1], player, self.config.subgame_depth_limit, create_gadget)
+    subgame_solver = SePoTCFR(self, states, counterfactual_values, reaches[player], reaches[-1], fixed_reaches, player, self.config.subgame_depth_limit, create_gadget, self.config.p)
     
     subgame_solver._alternating_updates = False
     # subgame_solver.multiple_steps(self.config.resolve_iterations)
@@ -70,10 +73,12 @@ class SePoT_RNaD:
     reaches_per_state = [[], [], []]
     counterfactual_values = [{}, {}]
     counterfactual_reaches = [{}, {}]
+    fixed_reaches_per_state = []
     # Go through each history and get policy from network, then follow it u
     for history in histories:
       state = self.rnad._game.new_initial_state()
       reaches = [1.0, 1.0, 1.0]
+      fixed_reach = 1.0
       for a in history:
         if state.is_chance_node():
           reaches[-1] *= state.chance_outcomes()[a]
@@ -86,6 +91,10 @@ class SePoT_RNaD:
           else:
             if state.current_player() == 1 - player:
               policy = self.rnad.action_probabilities(state)
+              # TODO: Ask Ondra if the actions size is all actions or only the legal ones
+              fixed_policy = self.fixed_policy(state)
+              fixed_policy = fixed_policy / jnp.sum(fixed_policy)
+              fixed_reach *= fixed_policy[a]
             else:
               assert False
             
@@ -103,6 +112,7 @@ class SePoT_RNaD:
       states.append(state)
       for i in range(len(reaches)):
         reaches_per_state[i].append(reaches[i])
+      fixed_reaches_per_state.append(fixed_reach)
       # reaches_per_state.append(reaches)
     
     # Normalizing in root
@@ -119,5 +129,6 @@ class SePoT_RNaD:
     assert len(states) == len(counterfactual_values_per_state)
     for rs in reaches_per_state:
       assert len(states) == len(rs)
-    return states, counterfactual_values_per_state, reaches_per_state
+    assert len(fixed_reaches_per_state) == len(states)
+    return states, counterfactual_values_per_state, reaches_per_state, fixed_reaches_per_state
     

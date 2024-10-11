@@ -69,10 +69,11 @@ class SePoTCFRConstants:
 
 
 class SePoTCFR(JaxCFR):
-  def __init__(self, sepot, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], player:int, depth_limit: int, construct_gadget: bool, multi_valued_states: list = []):
+  def __init__(self, sepot, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], fixed_reaches:list[float], player:int, depth_limit: int, construct_gadget: bool, p: float, multi_valued_states: list = []):
     assert len(states) == len(counterfactual_values)
     assert len(states) == len(player_reaches)
     assert len(states) == len(chance_reaches)
+    assert len(states) == len(fixed_reaches)
   
     self.timestep = 1
     self.sepot = sepot
@@ -87,11 +88,11 @@ class SePoTCFR(JaxCFR):
     # We add 1 to the depth limit, because we add a gadget 
     depth_limit += int(construct_gadget)
 
-    self.init(states, counterfactual_values, player_reaches, chance_reaches, player, depth_limit, construct_gadget)
+    self.init(states, counterfactual_values, player_reaches, chance_reaches, fixed_reaches, player, depth_limit, construct_gadget, p)
 
 
 
-  def init(self, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], player: int, depth_limit: int, construct_gadget: bool):
+  def init(self, states: list[pyspiel.State], counterfactual_values: list[float], player_reaches: list[float], chance_reaches:list[float], fixed_reaches:list[float], player: int, depth_limit: int, construct_gadget: bool, p:float):
     opponent = 1 - player
     players = 2
     transformations = self.sepot.rnad.config.num_transformations + 1
@@ -160,7 +161,7 @@ class SePoTCFR(JaxCFR):
 
     PreviousInfo = namedtuple('PreviousInfo', ('actions', 'isets', 'prev_actions', 'history', 'player'))
         
-    def _traverse_tree(state, previous_info, depth, chance = 1.0):
+    def _traverse_tree(state, previous_info, depth, chance = 1.0, fixed=False):
 
       if depth >= depth_limit:
         if len(depth_history_utility[0]) <= depth:
@@ -177,16 +178,17 @@ class SePoTCFR(JaxCFR):
           for pl in range(players):
             depth_history_utility[pl][depth].append(state.rewards()[pl])
         else:
-        # TODO: Cache states and then call network for batch
+          # TODO: create matrix valued states and store only the values in the first cell for the fixed player and force him to play 0
           # assert False
-          if state.information_state_string(opponent) not in multi_valued_isets_dict:
-            multi_valued_isets_dict[state.information_state_string(opponent)] = multi_valued_states_ids[0]
+          opponent_iset = state.information_state_string(opponent) + "fixed" if fixed else "free"
+          if opponent_iset not in multi_valued_isets_dict:
+            multi_valued_isets_dict[opponent_iset] = multi_valued_states_ids[0]
             multi_valued_states_ids[0] += 1
           multi_valued_states = self.sepot.rnad.get_multi_valued_states(state, player)
           # if state.information_state_string(opponent) == "T=4 Player=1 /v_0_0/shot_P0_0_0:H/shot_P1_1_0:H":
           #   print(state.state_tensor())
-          multi_valued_states_isets.append(multi_valued_isets_dict[state.information_state_string(opponent)])
-          multi_valued_states_actions.append([i + multi_valued_isets_dict[state.information_state_string(opponent)] * transformations for i in range(transformations)])
+          multi_valued_states_isets.append(multi_valued_isets_dict[opponent_iset])
+          multi_valued_states_actions.append([i + multi_valued_isets_dict[opponent_iset] * transformations for i in range(transformations)])
           multi_valued_states_previous_actions.append(previous_info.actions[player])
           multi_valued_states_chance_probabilities.append(chance)
           if self._use_rnad_multi_valued_states:
@@ -241,6 +243,8 @@ class SePoTCFR(JaxCFR):
         depth_history_previous_action[pl][depth].append(previous_info.actions[pl])
         if state.current_player() == pl:
           iset = state.information_state_string()
+          if pl == opponent:
+            iset = iset + "fixed" if fixed else "free"
           if iset not in pl_isets[pl]:
             pl_isets[pl][iset] = ids[pl]
             ids[pl] += 1
@@ -266,7 +270,7 @@ class SePoTCFR(JaxCFR):
           new_prev_actions,
           history_id,
           state.current_player(),
-          )
+        )
         new_state = state.clone()
         new_state.apply_action(a)
       
@@ -285,7 +289,7 @@ class SePoTCFR(JaxCFR):
         prev_iset = [0 for _ in range(players)]
         prev_action = [0 for _ in range(players)]
 
-        chance_reach = chance_reaches[i]# * player_reaches[i]
+        chance_reach = chance_reaches[i] * p;# * player_reaches[i]
 
         for pl in range(players):
           depth_history_utility[pl][0].append(0)
@@ -345,20 +349,29 @@ class SePoTCFR(JaxCFR):
         prev_amount_actions = [ 0 for _ in range(players)]
         prev_amount_actions[1 - player] = 1
 
-        _traverse_tree(state, PreviousInfo(tuple(prev_action), tuple(prev_iset), tuple(prev_amount_actions), i, 1 - player), 1, chance_reach) 
-        
+        _traverse_tree(state, PreviousInfo(tuple(prev_action), tuple(prev_iset), tuple(prev_amount_actions), i, 1 - player), 1, chance_reach, False)
+      for i, state in enumerate(states):
+        # TODO: add dummy node to make it in the right depth
+        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 1, chance_reaches[i] * (1 - p), True)
     else:
       # assert False # TODO: Just for testing, remove this later
       for i, state in enumerate(states):
-        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i])
+        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * p, False)
+        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * (1 - p), True)
 
-    init_iset_reaches = np.ones(ids[player])
+    init_iset_reaches = np.ones(ids)
     for state, reach in zip(states, player_reaches):
       assert state.current_player() == player
       iset = state.information_state_string()
-      if init_iset_reaches[pl_isets[player][iset]] < 1.0:
-        assert init_iset_reaches[pl_isets[player][iset]]  == reach
-      init_iset_reaches[pl_isets[player][iset]] = reach
+      if init_iset_reaches[player][pl_isets[player][iset]] < 1.0:
+        assert init_iset_reaches[player][pl_isets[player][iset]]  == reach
+      init_iset_reaches[player][pl_isets[player][iset]] = reach
+    # Adding initial iset reaches for the opponent in the fixed part
+    for state, reach in zip(states, fixed_reaches):
+      iset = state.information_state_string(opponent) + "fixed"
+      if init_iset_reaches[opponent][pl_isets[opponent][iset]] < 1.0:
+        assert init_iset_reaches[opponent][pl_isets[opponent][iset]]  == reach
+      init_iset_reaches[opponent][pl_isets[opponent][iset]] = reach
 
     def convert_to_jax(x):
       return [jnp.asarray(i) for i in x]
@@ -411,7 +424,7 @@ class SePoTCFR(JaxCFR):
 
       init_reaches = jnp.asarray(player_reaches),
       # init_reaches = jnp.ones_like(jnp.asarray(player_reaches)),
-      init_iset_reaches = jnp.asarray(init_iset_reaches),
+      init_iset_reaches = convert_to_jax(init_iset_reaches),
       init_chance = jnp.asarray(chance_reaches),
 
       multi_valued_states_isets = jnp.asarray(multi_valued_states_isets),
@@ -467,7 +480,8 @@ class SePoTCFR(JaxCFR):
     current_strategies = [self.regret_matching(regrets[pl], self.constants.iset_action_mask[pl]) for pl in range(self.constants.players)]
 
     weighted_strategies = [jnp.copy(current_strategies[pl]) for pl in range(self.constants.players)]
-    weighted_strategies[self.constants.resolving_player] = weighted_strategies[self.constants.resolving_player] * self.constants.init_iset_reaches[..., jnp.newaxis]
+    for pl in range(self.constants.players):  
+      weighted_strategies[pl] = weighted_strategies[pl] * self.constants.init_iset_reaches[pl][..., jnp.newaxis]
 
     realization_plans = self.propagate_strategy(weighted_strategies)
     iset_reaches = [jnp.sum(realization_plans[pl], -1) for pl in range(self.constants.players)]
@@ -533,6 +547,7 @@ class SePoTCFR(JaxCFR):
     realization_plans = self.propagate_strategy(weighted_strategies)
     iset_reaches = [jnp.sum(realization_plans[pl], -1) for pl in range(self.constants.players)]
     # In last row, there are only terminal, so we start row before it
+    # TODO: modify to compute MaVS
     if self.constants.reached_depth_limit:
       mvs_current = self.regret_matching(mvs_regrets, jnp.ones_like(mvs_regrets))
       
