@@ -33,7 +33,8 @@ def main():
 
   max_trajectory = 4 
   rnad_config = rnad.RNaDConfig(
-      game_name = game_name, 
+      game_name = game_name,
+      game_params = game_params,
       trajectory_max =  max_trajectory,
       policy_network_layers = args.rnad_network_layers,
       mvs_network_layers = args.mvs_network_layers,
