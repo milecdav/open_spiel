@@ -35,7 +35,9 @@ def main():
         rnad_config = rnad_config,
         resolve_iterations = 1000,
         subgame_size_limit = 10000000,
-        subgame_depth_limit = 2)
+        subgame_depth_limit = 2,
+        p = 0.5
+    )
   sepot_solver = sepot.SePoT_RNaD(sepot_config)
 
   sepot_solver.compute_policy(sepot_solver.rnad._game)
