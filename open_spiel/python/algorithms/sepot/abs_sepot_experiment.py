@@ -62,7 +62,7 @@ def main():
     )
   sepot_solver = sepot.SePoT_RNaD(sepot_config)
 
-  sepot_solver.compute_policy(sepot_solver.rnad._game)
+  sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
 
 if __name__ == "__main__":
     main()
