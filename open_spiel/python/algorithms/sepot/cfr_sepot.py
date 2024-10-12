@@ -180,7 +180,7 @@ class SePoTCFR(JaxCFR):
         else:
           # TODO: create matrix valued states and store only the values in the first cell for the fixed player and force him to play 0
           # assert False
-          opponent_iset = state.information_state_string(opponent) + "fixed" if fixed else "free"
+          opponent_iset = state.information_state_string(opponent) + ("fixed" if fixed else "free")
           if opponent_iset not in multi_valued_isets_dict:
             multi_valued_isets_dict[opponent_iset] = multi_valued_states_ids[0]
             multi_valued_states_ids[0] += 1
@@ -244,7 +244,7 @@ class SePoTCFR(JaxCFR):
         if state.current_player() == pl:
           iset = state.information_state_string()
           if pl == opponent:
-            iset = iset + "fixed" if fixed else "free"
+            iset = iset + ("fixed" if fixed else "free")
           if iset not in pl_isets[pl]:
             pl_isets[pl][iset] = ids[pl]
             ids[pl] += 1

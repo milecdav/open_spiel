@@ -7,7 +7,7 @@ import numpy as np
 
 from open_spiel.python.algorithms.sepot.rnad_sepot import RNaDConfig, RNaDSolver
 from open_spiel.python.algorithms.sepot.cfr_sepot import SePoTCFR
-from open_spiel.python.algorithms.reconstruct_public_state import reconstruct_states
+from open_spiel.python.algorithms.reconstruct_public_state import reconstruct
 
 
 def actions_per_player(state: pyspiel.State, player: int):
@@ -46,7 +46,7 @@ class SePoT_RNaD:
       self.rnad.step()
 
   def compute_policy(self, state: pyspiel.State, player: int):
-    histories, use_search = reconstruct_states(state)
+    histories, use_search = reconstruct(state)
     if not use_search:
       return self.rnad.action_probabilities(state)
     states, counterfactual_values, reaches, fixed_reaches = self.reconstruct_public_belief_state(histories, player)
