@@ -388,10 +388,11 @@ class SePoTCFR(JaxCFR):
       init_iset_reaches[player][pl_isets[player][iset]] = reach
     # Adding initial iset reaches for the opponent in the fixed part
     for state, reach in zip(states, fixed_reaches):
-      iset = state.child(0).information_state_string(opponent) + "fixed"
-      if init_iset_reaches[opponent][pl_isets[opponent][iset]] < 1.0:
-        assert init_iset_reaches[opponent][pl_isets[opponent][iset]]  == reach
-      init_iset_reaches[opponent][pl_isets[opponent][iset]] = reach
+      for action in state.legal_actions():
+        iset = state.child(action).information_state_string(opponent) + "fixed"
+        if init_iset_reaches[opponent][pl_isets[opponent][iset]] < 1.0:
+          assert init_iset_reaches[opponent][pl_isets[opponent][iset]]  == reach
+        init_iset_reaches[opponent][pl_isets[opponent][iset]] = reach
 
     def convert_to_jax(x):
       return [jnp.asarray(i) for i in x]
