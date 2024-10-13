@@ -622,7 +622,8 @@ class SePoTCFR(JaxCFR):
           regret = regret * self.constants.init_reaches[..., jnp.newaxis]
         bin_regrets = jnp.bincount(self.constants.depth_history_actions[pl][i].ravel(), regret.ravel(), length = self.constants.isets[pl] * self.constants.max_actions)
         bin_regrets = bin_regrets.reshape(-1, self.constants.max_actions)
-        regrets[pl] = jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), regrets[pl] + bin_regrets, regrets[pl])
+        regrets_update_mask = jnp.logical_and(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE),jnp.arange(regrets[pl].shape[0]) < self.constants.update_isets[pl]).reshape((self.constants.isets[pl], 1))
+        regrets[pl] = jnp.where(regrets_update_mask, regrets[pl] + bin_regrets, regrets[pl])
         depth_utils[pl].append(history_value) 
 
     regrets = [self.update_regrets(regrets[pl]) for pl in range(self.constants.players)]
