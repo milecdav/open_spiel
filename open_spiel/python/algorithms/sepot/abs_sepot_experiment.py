@@ -1,7 +1,10 @@
 import open_spiel.python.algorithms.sepot.rnad_sepot as rnad  
 import open_spiel.python.algorithms.sepot.sepot as sepot
+import open_spiel.python.algorithms.sepot.utils as sepot_utils
 import numpy as np
 import argparse
+
+from open_spiel.python.algorithms import best_response
 
 parser = argparse.ArgumentParser()
 
@@ -64,6 +67,11 @@ def main():
   sepot_solver = sepot.SePoT_RNaD(sepot_config)
 
   sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
+
+  policy = sepot_utils.take_policy_from_mvs(sepot_solver)
+
+  br = best_response.BestResponsePolicy(sepot_solver.game, 1, policy)
+  return br.value(sepot_solver.game.new_initial_state())
 
 if __name__ == "__main__":
     main()
