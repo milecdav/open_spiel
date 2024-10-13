@@ -22,8 +22,25 @@ import functools
 from collections import namedtuple
  
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR, update_regrets_plus, regret_matching, JAX_CFR_SIMULTANEOUS_UPDATE
-from open_spiel.python.algorithms.sepot.utils import create_first_action_policy
+from open_spiel.python.algorithms.get_all_states import get_all_states
 
+def create_first_action_policy(game):
+  policy = {}
+  states = get_all_states(
+        game,
+        depth_limit=1000,
+        include_terminals=False,
+        include_chance_states=False,
+        stop_if_encountered=False,
+        to_string=lambda s: s.information_state_string())
+  
+  for state in states.values():
+    legal_actions = state.legal_actions()
+    retval = {action: 0 for action in legal_actions}
+    retval[legal_actions[0]] = 1.
+    policy[state.information_state_string()] = retval
+  
+  return
 
 @chex.dataclass(frozen=True)
 class SePoTCFRConstants:

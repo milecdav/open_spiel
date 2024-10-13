@@ -1,6 +1,5 @@
 import open_spiel.python.algorithms.sepot.rnad_sepot as rnad  
 import open_spiel.python.algorithms.sepot.sepot as sepot
-import open_spiel.python.algorithms.sepot.utils as sepot_utils
 import numpy as np
 import argparse
 
