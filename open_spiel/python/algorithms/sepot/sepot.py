@@ -59,7 +59,8 @@ class SePoT_RNaD:
     
     subgame_solver._alternating_updates = False
     # subgame_solver.multiple_steps(self.config.resolve_iterations)
-    subgame_solver.multiple_steps(self.config.resolve_iterations)
+    # subgame_solver.multiple_steps(self.config.resolve_iterations)
+    subgame_solver.multiple_steps_stateful(self.config.resolve_iterations)
     
     policy = subgame_solver.average_policy_dict(player)
     
