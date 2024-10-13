@@ -502,9 +502,10 @@ class SePoTCFR(JaxCFR):
     policy = create_first_action_policy(self.game)
 
     for iset_string in policy:
-      actions = policy[iset_string]
-      for a in actions:
-        self.regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
+      if iset_string + "fixed" in pl_isets[opponent]:
+        actions = policy[iset_string]
+        for a in actions:
+          self.regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
 
     self.averages = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
 
