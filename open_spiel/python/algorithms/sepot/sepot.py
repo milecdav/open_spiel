@@ -88,9 +88,7 @@ class SePoT_RNaD:
           else:
             if state.current_player() == 1 - player:
               policy = self.rnad.action_probabilities(state)
-              # TODO: Ask Ondra if the actions size is all actions or only the legal ones
               fixed_policy = self.fixed_policy(state)
-              fixed_policy = fixed_policy / jnp.sum(fixed_policy)
               fixed_reach *= fixed_policy[a]
             else:
               assert False
