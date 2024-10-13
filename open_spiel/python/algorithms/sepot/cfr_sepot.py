@@ -377,6 +377,7 @@ class SePoTCFR(JaxCFR):
       # assert False # TODO: Just for testing, remove this later
       for i, state in enumerate(states):
         _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * p, False)
+      for i, state in enumerate(states):
         _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * (1 - p), True)
 
     init_iset_reaches = [np.ones(ids[0]), np.ones(ids[1])]
