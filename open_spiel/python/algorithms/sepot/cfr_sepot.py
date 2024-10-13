@@ -22,6 +22,7 @@ import functools
 from collections import namedtuple
  
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR, update_regrets_plus, regret_matching, JAX_CFR_SIMULTANEOUS_UPDATE
+from open_spiel.python.algorithms.sepot.abs_sepot_experiment import create_first_action_policy
 
 
 @chex.dataclass(frozen=True)
@@ -480,6 +481,13 @@ class SePoTCFR(JaxCFR):
     )
 
     self.regrets = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
+
+    policy = create_first_action_policy(self.game)
+
+    for iset_string in policy:
+      actions = policy[iset_string]
+      for a in actions:
+        self.regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
 
     self.averages = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
 
