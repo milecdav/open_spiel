@@ -38,7 +38,7 @@ class SePoT_RNaD:
     legal_actions = state.legal_actions()
     retval = {action: 0 for action in legal_actions} 
     retval[legal_actions[0]] = 1.
-    return 
+    return retval
 
   def reset_policy(self):
     self.policy = {}
@@ -83,7 +83,7 @@ class SePoT_RNaD:
           assert not state.is_terminal()
 
           # Checks if policy was computed, otherwise it uses the policy from rnad
-          if state.information_state_string() in self.policy:
+          if state.information_state_string() in self.policy and state.current_player() == player:
             policy = self.policy[state.information_state_string()]
           else:
             if state.current_player() == 1 - player:
