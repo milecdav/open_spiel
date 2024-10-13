@@ -399,6 +399,8 @@ class SePoTCFR(JaxCFR):
     def convert_to_jax_players(x):
       return [[jnp.asarray(i) for i in x[pl]] for pl in range(players)]
 
+    if construct_gadget:
+      player_reaches = np.repeat(player_reaches, 2)
 
     depth_history_utility = convert_to_jax_players(depth_history_utility)
     depth_history_iset = convert_to_jax_players(depth_history_iset)
