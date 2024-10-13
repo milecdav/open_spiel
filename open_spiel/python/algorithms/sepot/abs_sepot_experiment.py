@@ -62,16 +62,42 @@ def main():
         resolve_iterations = 1000,
         subgame_size_limit = 10000000,
         subgame_depth_limit = 100,
-        p = 0.5
+        p = 0
     )
   sepot_solver = sepot.SePoT_RNaD(sepot_config)
 
-  sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
+  player = 0
 
-  policy = sepot_utils.take_policy_from_mvs(sepot_solver)
+  # policy = sepot_utils.take_policy_from_mvs(sepot_solver)
 
-  br = best_response.BestResponsePolicy(sepot_solver.game, 1, policy)
-  return br.value(sepot_solver.game.new_initial_state())
+  # sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
+  sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state().child(0), 1)
+
+  pfk = policy.policy_for_key(sepot_solver.rnad._game.new_initial_state().information_state_string())
+  pfk[0] = 1.
+  pfk[1] = 0.
+  pfk[2] = 0.
+
+  dict_policy = policy.to_dict()
+  iset_to_int = {}
+  int_policy = {}
+  for i, key in enumerate(dict_policy):
+     iset_to_int[key] = i
+     int_policy[i] = dict_policy[key]
+
+  print(iset_to_int)
+  for key in iset_to_int:
+     print(key, iset_to_int[key])
+  for key in int_policy:
+     print(key, int_policy[key])
+
+  br = best_response.BestResponsePolicy(sepot_solver.rnad._game, 1 - player, policy)
+  print(br.value(sepot_solver.rnad._game.new_initial_state()))
+
+  br = best_response.BestResponsePolicy(sepot_solver.rnad._game, player, policy)
+  print(br.value(sepot_solver.rnad._game.new_initial_state()))
+
+
 
 if __name__ == "__main__":
     main()
