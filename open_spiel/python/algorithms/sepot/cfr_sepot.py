@@ -497,7 +497,8 @@ class SePoTCFR(JaxCFR):
       iset_action_depth = iset_action_depth,
     )
 
-    self.regrets = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
+
+    temp_regrets = [np.zeros((ids[pl], distinct_actions)) for pl in range(players)]    
 
     policy = create_first_action_policy(self.game)
 
@@ -505,7 +506,9 @@ class SePoTCFR(JaxCFR):
       if iset_string + "fixed" in pl_isets[opponent]:
         actions = policy[iset_string]
         for a in actions:
-          self.regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
+          temp_regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
+
+    self.regrets = [convert_to_jax(self.regrets[pl]) for pl in range(players)]
 
     self.averages = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
 
