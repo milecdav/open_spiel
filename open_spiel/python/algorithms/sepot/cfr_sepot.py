@@ -572,7 +572,8 @@ class SePoTCFR(JaxCFR):
     current_strategies = [self.regret_matching(regrets[pl], self.constants.iset_action_mask[pl]) for pl in range(self.constants.players)]
 
     weighted_strategies = [jnp.copy(current_strategies[pl]) for pl in range(self.constants.players)]
-    weighted_strategies[self.constants.resolving_player] = weighted_strategies[self.constants.resolving_player] * self.constants.init_iset_reaches[..., jnp.newaxis]
+    for pl in range(self.constants.players):
+      weighted_strategies[pl] = weighted_strategies[pl] * self.constants.init_iset_reaches[pl][..., jnp.newaxis]
 
     realization_plans = self.propagate_strategy(weighted_strategies)
     iset_reaches = [jnp.sum(realization_plans[pl], -1) for pl in range(self.constants.players)]
