@@ -38,6 +38,7 @@ class SePoTCFRConstants:
 
   max_iset_depth: chex.ArrayTree = () # Is just a list of integers
   isets: chex.ArrayTree = () # Is just a list of integers
+  update_isets: chex.ArrayTree = ()
 
   init_reaches: chex.Array = () # For each history in root
   init_iset_reaches: chex.Array = () # For each iset of resolving player
@@ -260,7 +261,7 @@ class SePoTCFR(JaxCFR):
       
       for a in state.legal_actions():
         new_chance = chance * chance_probabilities[a]
-        assert new_chance > 0.0
+        # assert new_chance > 0.0
         new_actions = tuple(previous_info.actions[pl] if state.current_player() != pl else pl_isets[pl][iset] * distinct_actions + a for pl in range(players))
         new_infosets = tuple(previous_info.isets[pl] if state.current_player() != pl else pl_isets[pl][iset] for pl in range(players))
         new_prev_actions = tuple(previous_info.prev_actions[pl] + int(state.current_player() == pl) for pl in range(players))
@@ -277,7 +278,7 @@ class SePoTCFR(JaxCFR):
         # simple workaround if the next element was not visited yet
         next_history_temp[a] = len(depth_history_utility[0][depth + 1]) if len(depth_history_utility[0]) > depth + 1 else 0
         
-        _traverse_tree(new_state, new_info, depth + 1, new_chance)
+        _traverse_tree(new_state, new_info, depth + 1, new_chance, fixed)
             
     
     if construct_gadget:
@@ -359,7 +360,7 @@ class SePoTCFR(JaxCFR):
         _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * p, False)
         _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 0, chance_reaches[i] * (1 - p), True)
 
-    init_iset_reaches = np.ones(ids)
+    init_iset_reaches = [np.ones(ids[0]), np.ones(ids[1])]
     for state, reach in zip(states, player_reaches):
       assert state.current_player() == player
       iset = state.information_state_string()
@@ -368,7 +369,7 @@ class SePoTCFR(JaxCFR):
       init_iset_reaches[player][pl_isets[player][iset]] = reach
     # Adding initial iset reaches for the opponent in the fixed part
     for state, reach in zip(states, fixed_reaches):
-      iset = state.information_state_string(opponent) + "fixed"
+      iset = state.child(0).information_state_string(opponent) + "fixed"
       if init_iset_reaches[opponent][pl_isets[opponent][iset]] < 1.0:
         assert init_iset_reaches[opponent][pl_isets[opponent][iset]]  == reach
       init_iset_reaches[opponent][pl_isets[opponent][iset]] = reach
@@ -420,6 +421,7 @@ class SePoTCFR(JaxCFR):
 
       max_iset_depth = max_iset_depth,
       isets = ids,
+      update_isets = [ids[0], ids[1]],
       multi_valued_states_ids = multi_valued_states_ids[0],
 
       init_reaches = jnp.asarray(player_reaches),
@@ -453,8 +455,12 @@ class SePoTCFR(JaxCFR):
       iset_action_mask = iset_action_mask,
       iset_action_depth = iset_action_depth,
     )
+
     self.regrets = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
+
     self.averages = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
+
+    self.constants.update_isets[opponent] = int((self.constants.update_isets[opponent] + 1) / 2)
     
     self.regret_matching = jax.vmap(regret_matching, 0, 0)
     self.iset_map = pl_isets
@@ -514,8 +520,9 @@ class SePoTCFR(JaxCFR):
           regret = regret * self.constants.init_reaches[..., jnp.newaxis]
         bin_regrets = jnp.bincount(self.constants.depth_history_actions[pl][i].ravel(), regret.ravel(), length = self.constants.isets[pl] * self.constants.max_actions)
         bin_regrets = bin_regrets.reshape(-1, self.constants.max_actions)
-        regrets[pl] = jnp.where(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE), regrets[pl] + bin_regrets, regrets[pl])
-        depth_utils[pl].append(history_value) 
+        regrets_update_mask = jnp.logical_and(jnp.logical_or(player == pl, player == JAX_CFR_SIMULTANEOUS_UPDATE),jnp.arange(regrets[pl].shape[0]) < self.constants.update_isets[pl]).reshape((self.constants.isets[pl], 1))
+        regrets[pl] = jnp.where(regrets_update_mask, regrets[pl] + bin_regrets, regrets[pl])
+        depth_utils[pl].append(history_value)
 
     regrets = [self.update_regrets(regrets[pl]) for pl in range(self.constants.players)]
  
