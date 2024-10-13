@@ -36,9 +36,9 @@ class SePoT_RNaD:
 
   def fixed_policy(self, state):
     legal_actions = state.legal_actions()
-    return {
-        action: 1./len(legal_actions) for action in legal_actions
-    }
+    retval = {action: 0 for action in legal_actions} 
+    retval[legal_actions[0]] = 1.
+    return 
 
   def reset_policy(self):
     self.policy = {}
