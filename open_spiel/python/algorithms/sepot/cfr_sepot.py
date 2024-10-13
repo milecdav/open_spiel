@@ -351,9 +351,28 @@ class SePoTCFR(JaxCFR):
         prev_amount_actions[1 - player] = 1
 
         _traverse_tree(state, PreviousInfo(tuple(prev_action), tuple(prev_iset), tuple(prev_amount_actions), i, 1 - player), 1, chance_reach, False)
+      dummy_chance_mask = [0] * distinct_actions
+      dummy_chance_mask[0] = 1
+      dummy_chance_probability = [0.] * distinct_actions
+      dummy_chance_probability[0] = 1.
       for i, state in enumerate(states):
-        # TODO: add dummy node to make it in the right depth
-        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), i, 1 - player), 1, chance_reaches[i] * (1 - p), True)
+        dummy_distory_id = len(depth_history_player[0])
+        next_history = [0 for _ in range(distinct_actions)]
+        next_history[0] = len(depth_history_player[1])
+        depth_history_next_history[0].append(next_history)
+        depth_history_player[0].append(pyspiel.kChancePlayerId)
+        depth_history_chance[0].append(chance_reaches[i] * (1 - p))
+        depth_history_previous_history[0].append(0)
+        depth_history_action_mask[0].append(dummy_chance_mask)
+        depth_history_chance_probabilities[0].append(dummy_chance_probability)
+        for pl in range(players):
+          depth_history_utility[pl][0].append(0.0)
+          depth_history_previous_iset[pl][0].append(0)
+          depth_history_previous_action[pl][0].append(0)
+          depth_history_iset[pl][0].append(0)
+          depth_history_actions[pl][0].append([0 for _ in range(distinct_actions)])
+
+        _traverse_tree(state, PreviousInfo((0, 0), (0, 0), (0, 0), dummy_distory_id, 1 - player), 1, chance_reaches[i] * (1 - p), True)
     else:
       # assert False # TODO: Just for testing, remove this later
       for i, state in enumerate(states):
