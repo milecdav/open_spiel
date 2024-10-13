@@ -40,7 +40,7 @@ def create_first_action_policy(game):
     retval[legal_actions[0]] = 1.
     policy[state.information_state_string()] = retval
   
-  return
+  return policy
 
 @chex.dataclass(frozen=True)
 class SePoTCFRConstants:
