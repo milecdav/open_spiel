@@ -22,7 +22,7 @@ import functools
 from collections import namedtuple
  
 from open_spiel.python.jax.cfr.jax_cfr import JaxCFR, update_regrets_plus, regret_matching, JAX_CFR_SIMULTANEOUS_UPDATE
-from open_spiel.python.algorithms.sepot.abs_sepot_experiment import create_first_action_policy
+from open_spiel.python.algorithms.sepot.utils import create_first_action_policy
 
 
 @chex.dataclass(frozen=True)

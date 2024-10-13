@@ -130,4 +130,22 @@ def compare_policies_mvs_rnad(solver: SePoT_RNaD):
   print("RNAD exploitability P2: ", rnad_p2)
   print("MVS exploitability P1: ", mvs_p1)
   print("MVS exploitability P2: ", mvs_p2)
+
+def create_first_action_policy(game):
+  policy = {}
+  states = get_all_states(
+        game,
+        depth_limit=1000,
+        include_terminals=False,
+        include_chance_states=False,
+        stop_if_encountered=False,
+        to_string=lambda s: s.information_state_string())
+  
+  for state in states.values():
+    legal_actions = state.legal_actions()
+    retval = {action: 0 for action in legal_actions}
+    retval[legal_actions[0]] = 1.
+    policy[state.information_state_string()] = retval
+  
+  return
   
