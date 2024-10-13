@@ -360,7 +360,7 @@ class SePoTCFR(JaxCFR):
         next_history = [0 for _ in range(distinct_actions)]
         next_history[0] = len(depth_history_player[1])
         depth_history_next_history[0].append(next_history)
-        depth_history_player[0].append(pyspiel.kChancePlayerId)
+        depth_history_player[0].append(-1) # chance player
         depth_history_chance[0].append(chance_reaches[i] * (1 - p))
         depth_history_previous_history[0].append(0)
         depth_history_action_mask[0].append(dummy_chance_mask)
