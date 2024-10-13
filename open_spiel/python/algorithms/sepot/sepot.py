@@ -35,8 +35,10 @@ class SePoT_RNaD:
     self.policy = {}
 
   def fixed_policy(self, state):
-    policy = state.legal_action_mask()
-    return policy / np.sum(policy)
+    legal_actions = state.legal_actions()
+    return {
+        action: 1./len(legal_actions) for action in legal_actions
+    }
 
   def reset_policy(self):
     self.policy = {}
