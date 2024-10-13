@@ -508,7 +508,7 @@ class SePoTCFR(JaxCFR):
         for a in actions:
           temp_regrets[opponent][pl_isets[opponent][iset_string + "fixed"]][a] = actions[a] 
 
-    self.regrets = [convert_to_jax(self.regrets[pl]) for pl in range(players)]
+    self.regrets = [convert_to_jax(temp_regrets[pl]) for pl in range(players)]
 
     self.averages = [jnp.zeros((ids[pl], distinct_actions)) for pl in range(players)]
 
