@@ -1,5 +1,6 @@
 import open_spiel.python.algorithms.sepot.rnad_sepot as rnad  
 import open_spiel.python.algorithms.sepot.sepot as sepot
+import open_spiel.python.algorithms.sepot.utils as sepot_utils
 import numpy as np
 import argparse
 
@@ -67,15 +68,10 @@ def main():
 
   player = 0
 
-  # policy = sepot_utils.take_policy_from_mvs(sepot_solver)
+  policy = sepot_utils.take_policy_from_mvs(sepot_solver)
 
-  # sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
-  sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state().child(0), 1)
-
-  pfk = policy.policy_for_key(sepot_solver.rnad._game.new_initial_state().information_state_string())
-  pfk[0] = 1.
-  pfk[1] = 0.
-  pfk[2] = 0.
+#   sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state(), 0)
+#   sepot_solver.compute_policy(sepot_solver.rnad._game.new_initial_state().child(0), 1)
 
   dict_policy = policy.to_dict()
   iset_to_int = {}
