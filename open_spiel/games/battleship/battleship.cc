@@ -226,8 +226,13 @@ std::vector<double> BattleshipState::Returns() const {
       if (DidShipSink(ship, Player{1})) damage_pl2 += ship.value;
     }
 
-    return {damage_pl2 - loss_multiplier * damage_pl1,
-            damage_pl1 - loss_multiplier * damage_pl2};
+    if(damage_pl1 > damage_pl2) {
+      return {-1, 1};
+    } else {
+      return {1, -1};
+    }
+    // return {damage_pl2 - loss_multiplier * damage_pl1,
+    //         damage_pl1 - loss_multiplier * damage_pl2};
   }
 }
 
