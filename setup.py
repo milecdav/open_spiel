@@ -92,7 +92,10 @@ class BuildExt(build_ext):
         env=env)
 
     # Build only pyspiel (for pip package)
-    subprocess.check_call(["make", "pyspiel", f"-j{os.cpu_count()}"],
+    detected_jobs = os.cpu_count()
+    jobs = max(detected_jobs or 1, 1)
+    print(f"Building pyspiel with {jobs} parallel job(s)")
+    subprocess.check_call(["make", "pyspiel", f"-j{jobs}"],
                           cwd=self.build_temp,
                           env=env)
 
@@ -124,7 +127,7 @@ else:
 
 setuptools.setup(
     name="open_spiel",
-    version="1.5",
+    version="1.6.11",
     license="Apache 2.0",
     author="The OpenSpiel authors",
     author_email="open_spiel@google.com",
@@ -133,8 +136,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/deepmind/open_spiel",
     install_requires=_get_requirements(req_file),
-    python_requires=">=3.9",
+    python_requires=">=3.11",
     ext_modules=[CMakeExtension("pyspiel", sourcedir="open_spiel")],
     cmdclass={"build_ext": BuildExt},
     zip_safe=False,
-    packages=setuptools.find_packages(include=["open_spiel", "open_spiel.*"]))
+    packages=setuptools.find_packages(include=["open_spiel", "open_spiel.*"]),
+)

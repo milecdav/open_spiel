@@ -19,6 +19,7 @@ https://ieeexplore.ieee.org/document/6203567
 
 import copy
 import enum
+from absl import logging
 import numpy as np
 import pyspiel
 
@@ -74,7 +75,7 @@ class ISMCTSBot(pyspiel.Bot):
                final_policy_type=ISMCTSFinalPolicyType.MAX_VISIT_COUNT,
                use_observation_string=False,
                allow_inconsistent_action_sets=False,
-               child_selection_policy=ChildSelectionPolicy.PUCT):
+               child_selection_policy=ChildSelectionPolicy.UCT):
 
     pyspiel.Bot.__init__(self)
     self._game = game
@@ -139,10 +140,16 @@ class ISMCTSBot(pyspiel.Bot):
       return self.get_final_policy(state, self._root_node)
 
   def step(self, state):
+    if state.is_chance_node():
+      logging.info('State is a chance node, returning invalid action policy.')
+      return pyspiel.INVALID_ACTION
     action_list, prob_list = zip(*self.run_search(state))
     return self._random_state.choice(action_list, p=prob_list)
 
   def get_policy(self, state):
+    if state.is_chance_node():
+      logging.info('State is a chance node, returning invalid action policy.')
+      return [(pyspiel.INVALID_ACTION, 1.0)]
     return self.run_search(state)
 
   def step_with_policy(self, state):
@@ -153,11 +160,16 @@ class ISMCTSBot(pyspiel.Bot):
 
   def get_final_policy(self, state, node):
     assert node
-    if self._final_policy_type == ISMCTSFinalPolicyType.NORMALIZED_VISITED_COUNT:
+    if (
+        self._final_policy_type
+        == ISMCTSFinalPolicyType.NORMALIZED_VISITED_COUNT
+    ):
       assert node.total_visits > 0
       total_visits = node.total_visits
-      policy = [(action, child.visits / total_visits)
-                for action, child in node.child_info.items()]
+      policy = [
+          (action, child.visits / total_visits)
+          for action, child in node.child_info.items()
+      ]
     elif self._final_policy_type == ISMCTSFinalPolicyType.MAX_VISIT_COUNT:
       assert node.total_visits > 0
       max_visits = -float('inf')
@@ -241,46 +253,83 @@ class ISMCTSBot(pyspiel.Bot):
         del new_node.child_info[action]
     return new_node
 
-  def expand_if_necessary(self, node, action):
+  def repopulate_prior_map_inconsistent_action_sets(self, state, node):
+    """Repopulate the prior map for a node with an inconsistent action set.
+
+    Args:
+      state: The state of the game.
+      node: The node to repopulate the prior map for.
+
+    When we allow inconsistent action sets, it is possible that we encounter a
+    legal action that was not in the prior when evaluated (when the node was)
+    added to the tree. This function adds any missing actions to the prior map
+    and normalizes the probabilities.
+    """
+    new_prior_map = node.prior_map.copy()
+    for action, prob in self._evaluator.prior(state):
+      if action not in new_prior_map:
+        new_prior_map[action] = prob
+    # now, normalize
+    sum_probs = sum(new_prior_map.values())
+    for action, prob in new_prior_map.items():
+      new_prior_map[action] = prob / sum_probs
+    node.prior_map = new_prior_map
+
+  def expand_if_necessary(self, state, node, action):
     if action not in node.child_info:
+      if self._allow_inconsistent_action_sets and action not in node.prior_map:
+        # This can happen if the prior map was populated from a state that had
+        # a different legal action set than the current state.
+        self.repopulate_prior_map_inconsistent_action_sets(state, node)
       node.child_info[action] = ChildInfo(0.0, 0.0, node.prior_map[action])
 
-  def select_action_tree_policy(self, node, legal_actions):
+  def select_action_tree_policy(self, state, node, legal_actions):
     if self._allow_inconsistent_action_sets:
       temp_node = self.filter_illegals(node, legal_actions)
       if temp_node.total_visits == 0:
         action = legal_actions[self._random_state.randint(
             len(legal_actions))]  # prior?
-        self.expand_if_necessary(node, action)
+        self.expand_if_necessary(state, node, action)
         return action
       else:
         return self.select_action(temp_node)
     else:
       return self.select_action(node)
 
-  def select_action(self, node):
+  def _action_value(self, node, child):
+    assert child.visits > 0
+    action_value = child.value()
+    if self._child_selection_policy == ChildSelectionPolicy.UCT:
+      action_value += self._uct_c * np.sqrt(
+          np.log(node.total_visits) / child.visits
+      )
+    elif self._child_selection_policy == ChildSelectionPolicy.PUCT:
+      action_value += (
+          self._uct_c
+          * child.prior
+          * np.sqrt(node.total_visits)
+          / (1 + child.visits)
+      )
+    else:
+      raise pyspiel.SpielError('Child selection policy unrecognized.')
+    return action_value
+
+  def _select_candidate_actions(self, node):
     candidates = []
-    max_value = -float('inf')
+
+    max_action_value = max(
+        [self._action_value(node, child) for child in node.child_info.values()]
+    )
+
+    # Select all the actions within the tolerance of the best action.
     for action, child in node.child_info.items():
-      assert child.visits > 0
-
-      action_value = child.value()
-      if self._child_selection_policy == ChildSelectionPolicy.UCT:
-        action_value += (self._uct_c *
-                         np.sqrt(np.log(node.total_visits)/child.visits))
-      elif self._child_selection_policy == ChildSelectionPolicy.PUCT:
-        action_value += (self._uct_c * child.prior *
-                         np.sqrt(node.total_visits)/(1 + child.visits))
-      else:
-        raise pyspiel.SpielError('Child selection policy unrecognized.')
-      if action_value > max_value + TIE_TOLERANCE:
-        candidates = [action]
-        max_value = action_value
-      elif (action_value > max_value - TIE_TOLERANCE and
-            action_value < max_value + TIE_TOLERANCE):
+      if self._action_value(node, child) > max_action_value - TIE_TOLERANCE:
         candidates.append(action)
-        max_value = action_value
 
+    return candidates
+
+  def select_action(self, node):
+    candidates = self._select_candidate_actions(node)
     assert len(candidates) >= 1
     return candidates[self._random_state.randint(len(candidates))]
 
@@ -320,9 +369,10 @@ class ISMCTSBot(pyspiel.Bot):
       if chosen_action != pyspiel.INVALID_ACTION:
         # check if all actions have been expanded, if not, select one?
         # if yes, ucb?
-        self.expand_if_necessary(node, chosen_action)
+        self.expand_if_necessary(state, node, chosen_action)
       else:
-        chosen_action = self.select_action_tree_policy(node, legal_actions)
+        chosen_action = self.select_action_tree_policy(state, node,
+                                                       legal_actions)
 
       assert chosen_action != pyspiel.INVALID_ACTION
 

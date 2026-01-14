@@ -14,14 +14,15 @@
 
 #include "open_spiel/games/bargaining/bargaining.h"
 
-#include <array>
-#include <iostream>
+#include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "open_spiel/abseil-cpp/absl/flags/flag.h"
 #include "open_spiel/abseil-cpp/absl/flags/parse.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_cat.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/spiel_utils.h"
 #include "open_spiel/tests/basic_tests.h"
 #include "open_spiel/utils/init.h"
 
@@ -34,7 +35,7 @@ namespace bargaining {
 namespace {
 
 constexpr const char* kInstancesFilename =
-    "third_party/open_spiel/games/bargaining_instances1000.txt";
+    "open_spiel/games/bargaining/bargaining_instances1000.txt";
 constexpr int kFileNumInstances = 1000;
 
 namespace testing = open_spiel::testing;
@@ -134,6 +135,68 @@ void BasicBargainingFromInstancesFileTests() {
   testing::RandomSimTest(*game, 100);
 }
 
+void BasicBargainingFromCCInstancesTests() {
+  std::shared_ptr<const Game> game = LoadGame("bargaining");
+
+  const auto* bargaining_game = static_cast<const BargainingGame*>(game.get());
+  SPIEL_CHECK_EQ(bargaining_game->AllInstances().size(), kDefaultNumInstances);
+}
+
+void BasicBargainingInstanceMapTests() {
+  std::shared_ptr<const Game> game = LoadGame("bargaining");
+  const auto* bargaining_game = static_cast<const BargainingGame*>(game.get());
+  for (int i = 0; i < bargaining_game->AllInstances().size(); ++i) {
+    const Instance& instance = bargaining_game->GetInstance(i);
+    SPIEL_CHECK_EQ(bargaining_game->GetInstanceIndex(instance), i);
+  }
+}
+
+void BasicBargainingOfferMapTests() {
+  std::shared_ptr<const Game> game = LoadGame("bargaining");
+  const auto* bargaining_game = static_cast<const BargainingGame*>(game.get());
+  for (int i = 0; i < bargaining_game->AllOffers().size(); ++i) {
+    const Offer& offer = bargaining_game->GetOffer(i);
+    SPIEL_CHECK_EQ(bargaining_game->GetOfferIndex(offer), i);
+  }
+}
+
+void BasicMaxNumInstancesTests() {
+  for (int max_num_instances : {10, 100, 1000, 2000}) {
+    std::shared_ptr<const Game> game = LoadGame(
+        absl::StrCat("bargaining(max_num_instances=", max_num_instances, ")"));
+    const auto* bargaining_game =
+        static_cast<const BargainingGame*>(game.get());
+    // Can't have more instances than what is available.
+    int expected_num_instances =
+        std::min(max_num_instances, kDefaultNumInstances);
+    SPIEL_CHECK_EQ(bargaining_game->AllInstances().size(),
+                   expected_num_instances);
+  }
+}
+
+void BasicBargainingOpponentValuesTests() {
+  // 1000 instance default.
+  std::shared_ptr<const Game> game = LoadGame("bargaining");
+  const auto* bargaining_game = static_cast<const BargainingGame*>(game.get());
+  std::vector<std::vector<int>> expected_values = {
+    {4, 0, 2}, {7, 0, 1}, {1, 3, 1}
+  };
+  std::vector<int> pool_values = {1, 2, 3};
+  std::vector<int> opponent_values = {8, 1, 0};
+  std::vector<std::vector<int>> actual_values =
+      bargaining_game->GetPossibleOpponentValues(0, pool_values,
+                                                 opponent_values);
+  SPIEL_CHECK_EQ(actual_values, expected_values);
+
+  // 100 instances default has one less possible opponent value.
+  game = LoadGame("bargaining(max_num_instances=100)");
+  bargaining_game = static_cast<const BargainingGame*>(game.get());
+  expected_values.pop_back();
+  actual_values = bargaining_game->GetPossibleOpponentValues(0, pool_values,
+                                                             opponent_values);
+  SPIEL_CHECK_EQ(actual_values, expected_values);
+}
+
 }  // namespace
 }  // namespace bargaining
 }  // namespace open_spiel
@@ -149,4 +212,9 @@ int main(int argc, char** argv) {
   open_spiel::bargaining::BargainingDiscountTest();
   open_spiel::bargaining::BargainingProbEndContinueTest();
   open_spiel::bargaining::BargainingProbEndEndTest();
+  open_spiel::bargaining::BasicBargainingFromCCInstancesTests();
+  open_spiel::bargaining::BasicBargainingInstanceMapTests();
+  open_spiel::bargaining::BasicBargainingOfferMapTests();
+  open_spiel::bargaining::BasicMaxNumInstancesTests();
+  open_spiel::bargaining::BasicBargainingOpponentValuesTests();
 }

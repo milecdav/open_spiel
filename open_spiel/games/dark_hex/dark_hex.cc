@@ -22,8 +22,8 @@
 
 #include "open_spiel/abseil-cpp/absl/strings/str_cat.h"
 #include "open_spiel/abseil-cpp/absl/types/span.h"
-#include "open_spiel/games/hex/hex.h"
 #include "open_spiel/game_parameters.h"
+#include "open_spiel/games/hex/hex.h"
 #include "open_spiel/observer.h"
 #include "open_spiel/spiel.h"
 #include "open_spiel/spiel_utils.h"
@@ -107,7 +107,8 @@ DarkHexState::DarkHexState(std::shared_ptr<const Game> game, int num_cols,
                            int num_rows, GameVersion game_version,
                            ObservationType obs_type)
     : State(game),
-      state_(game, num_cols, num_rows),
+      state_(game, num_cols, num_rows, hex::StringRep::kStandard,
+             /*swap=*/false),
       obs_type_(obs_type),
       game_version_(game_version),
       num_cols_(num_cols),
@@ -145,7 +146,7 @@ void DarkHexState::DoApplyAction(Action move) {
     }
   }
 
-  SPIEL_CHECK_EQ(cur_view[move], CellState::kEmpty);
+  SPIEL_CHECK_TRUE(cur_view[move] == CellState::kEmpty);
   // Update the view - only using CellState::kBlack and CellState::kWhite
   if (state_.BoardAt(move) == CellState::kBlack ||
       state_.BoardAt(move) == CellState::kBlackNorth ||
@@ -185,7 +186,8 @@ std::string DarkHexState::ViewToString(Player player) const {
 
   for (int r = 0; r < num_rows_; ++r) {
     for (int c = 0; c < num_cols_; ++c) {
-      absl::StrAppend(&str, StateToString(cur_view[r * num_cols_ + c]));
+      absl::StrAppend(&str, StateToString(cur_view[r * num_cols_ + c],
+                                          state_.string_rep()));
     }
     if (r < (num_rows_ - 1)) {
       absl::StrAppend(&str, "\n");

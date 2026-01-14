@@ -15,11 +15,15 @@
 #ifndef OPEN_SPIEL_GAMES_BLACKJACK_H_
 #define OPEN_SPIEL_GAMES_BLACKJACK_H_
 
+#include <functional>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
+#include "open_spiel/game_parameters.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/spiel_utils.h"
 
 // A simple game that includes chance and imperfect information
 // http://en.wikipedia.org/wiki/Blackjack
@@ -31,6 +35,13 @@ namespace blackjack {
 constexpr int kNumSuits = 4;
 constexpr int kCardsPerSuit = 13;
 constexpr int kDeckSize = kCardsPerSuit * kNumSuits;
+constexpr int kMaxSum = 30;  // player busts by hitting on 20 and receiving a 10
+constexpr const char* kHiddenCardStr = "??";
+
+// Moves.
+enum ActionType { kHit = 0, kStand = 1 };
+
+enum Phase { kInitialDeal = 0, kPlayerTurn = 1, kDealerTurn = 2 };
 
 class BlackjackGame;
 
@@ -60,15 +71,31 @@ class BlackjackState : public State {
   int CardValue(int card) const;
   void EndPlayerTurn(int player);
   void DealCardToPlayer(int player, int card);
+  bool IsTurnOver(int player) const { return turn_over_[player]; }
+  std::vector<int> cards(int player) const { return cards_[player]; }
+  std::string InformationStateString(Player player) const;
+  std::unique_ptr<State> ResampleFromInfostate(
+      int player_id, std::function<double()> rng) const override;
+
+  Phase phase() const { return phase_; }
+  std::set<int> VisibleCards() const;
+  std::vector<int> VisibleCardsSortedVector() const;
+  std::vector<int> PlayerCardsSortedVector() const;
+
+  // Returns the dealer's initial visible card, if it's been dealt. Otherwise
+  // returns -1.
+  int DealersVisibleCard() const;
 
  protected:
   void DoApplyAction(Action move_id) override;
 
  private:
   void MaybeApplyDealerAction();
+  std::string StateToString(bool show_all_dealers_card) const;
 
   // Initialize to bad/invalid values. Use open_spiel::NewInitialState()
 
+  Phase phase_ = kInitialDeal;
   int total_moves_ = -1;    // Total num moves taken during the game.
   Player cur_player_ = -1;  // Player to play.
   int turn_player_ = -1;    // Whose actual turn is it. At chance nodes, we need
@@ -98,13 +125,24 @@ class BlackjackGame : public Game {
   double MaxUtility() const override { return +1; }
   std::vector<int> ObservationTensorShape() const override {
     return {
-        NumPlayers() + 1 +                      // turn  (incl. chance)
-        1 +                                     // is terminal?
-        (kNumSuits + 1) * (NumPlayers() + 1) +  // num_aces_ for every player
-        kDeckSize * (NumPlayers() + 1)  // many-hot of the cards for each player
+        NumPlayers() + 1 +              // turn  (incl. chance)
+        1 +                             // is terminal?
+        kMaxSum +                       // player best sum
+        kDeckSize +                     // dealer's initial visible card
+        kDeckSize * (NumPlayers() + 1)  // many-hot of the visible cards
     };
   };
 };
+
+std::string CardToString(int card);
+std::string PhaseToString(Phase phase);
+std::vector<std::string> CardsToStrings(const std::vector<int>& cards,
+                                        int start_index = 0);
+
+// Gets a card id from a string representation. Returns -1 if the string is not
+// a valid card.
+int GetCardByString(std::string card_string);
+
 
 }  // namespace blackjack
 }  // namespace open_spiel

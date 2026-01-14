@@ -21,10 +21,12 @@
 #include <vector>
 
 #include "open_spiel/abseil-cpp/absl/random/uniform_int_distribution.h"
+#include "open_spiel/abseil-cpp/absl/strings/str_split.h"
 #include "open_spiel/abseil-cpp/absl/types/optional.h"
 #include "open_spiel/abseil-cpp/absl/types/span.h"
 #include "open_spiel/games/chess/chess_board.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/spiel_globals.h"
 #include "open_spiel/spiel_utils.h"
 #include "open_spiel/tests/basic_tests.h"
 
@@ -89,6 +91,70 @@ void BasicChess960Tests() {
   // Undo only works after the chance node in chess960.
   // testing::RandomSimTestWithUndo(*LoadGame(chess960_game_string), 10);
 }
+
+void Chess960SerializationRootIsChanceNodeTest() {
+  std::shared_ptr<const Game> game = LoadGame("chess(chess960=true)");
+
+  std::unique_ptr<State> state = game->NewInitialState();
+  SPIEL_CHECK_TRUE(state->IsChanceNode());
+  state->ApplyAction(0);
+  SPIEL_CHECK_FALSE(state->IsChanceNode());
+  Action action = state->LegalActions()[0];
+  state->ApplyAction(action);
+  SPIEL_CHECK_EQ(state->History().size(), 2);  // chance outcome + move
+
+  // Do one round-trip serialization -> deserialization.
+  // State should be the same after serialization and deserialization and
+  // histories the same length (one chance node + one move).
+  std::string state_string = state->ToString();
+  std::string serialized_state = state->Serialize();
+  std::unique_ptr<State> deserialized_state =
+      game->DeserializeState(serialized_state);
+  SPIEL_CHECK_EQ(state_string, deserialized_state->ToString());
+  SPIEL_CHECK_EQ(deserialized_state->History().size(), 2);
+  SPIEL_CHECK_EQ(deserialized_state->History()[0], 0);
+  SPIEL_CHECK_EQ(deserialized_state->History()[1], action);
+
+  // Do a second round-trip serialization -> deserialization.
+  // State should be the same after serialization and deserialization, and
+  // histories should be the same length as before.
+  serialized_state = deserialized_state->Serialize();
+  deserialized_state = game->DeserializeState(serialized_state);
+  SPIEL_CHECK_EQ(state_string, deserialized_state->ToString());
+  SPIEL_CHECK_EQ(deserialized_state->History().size(), 2);
+}
+
+void Chess960SerializationRootIsSpecificStartingPositionTest() {
+  std::shared_ptr<const Game> game = LoadGame("chess(chess960=true)");
+
+  std::unique_ptr<State> state = game->NewInitialState(
+      "qrbkrnnb/pppppppp/8/8/8/8/PPPPPPPP/QRBKRNNB w KQkq - 0 1"
+  );
+  SPIEL_CHECK_FALSE(state->IsChanceNode());
+  Action action = state->LegalActions()[0];
+  state->ApplyAction(action);
+  SPIEL_CHECK_EQ(state->History().size(), 1);
+
+  // Do one round-trip serialization -> deserialization.
+  // State should be the same after serialization and deserialization.
+  // History should be the same length as before (one move).
+  std::string state_string = state->ToString();
+  std::string serialized_state = state->Serialize();
+  std::unique_ptr<State> deserialized_state =
+      game->DeserializeState(serialized_state);
+  SPIEL_CHECK_EQ(state_string, deserialized_state->ToString());
+  SPIEL_CHECK_EQ(deserialized_state->History().size(), 1);
+  SPIEL_CHECK_EQ(deserialized_state->History()[0], action);
+
+  // Do a second round-trip serialization -> deserialization.
+  // State should be the same after serialization and deserialization, and
+  // History should be the same length as before (one move).
+  serialized_state = deserialized_state->Serialize();
+  deserialized_state = game->DeserializeState(serialized_state);
+  SPIEL_CHECK_EQ(state_string, deserialized_state->ToString());
+  SPIEL_CHECK_EQ(deserialized_state->History().size(), 1);
+}
+
 
 void MoveGenerationTests() {
   // These perft positions and results are from here:
@@ -317,6 +383,35 @@ void SerializaitionTests() {
   SPIEL_CHECK_EQ(state->ToString(), deserialized_state->ToString());
 }
 
+void ThreeFoldRepetitionTestWithEnPassant() {
+  // Example from:
+  // https://www.chess.com/article/view/think-twice-before-a-threefold-repetition
+  std::string san_history_str =
+      "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 "
+      "b5 Bb3 d6 c3 O-O h3 Bb7 d4 Re8 Ng5 Rf8 Nf3 Re8 Ng5 Rf8 Nf3";
+  std::vector<std::string> san_history = absl::StrSplit(san_history_str, ' ');
+
+  auto game = LoadGame("chess");
+  std::unique_ptr<State> state = game->NewInitialState();
+
+  for (const std::string& san : san_history) {
+    SPIEL_CHECK_FALSE(state->IsTerminal());
+    Action chosen_action = kInvalidAction;
+    for (Action action : state->LegalActions()) {
+      if (state->ActionToString(action) == san) {
+        chosen_action = action;
+        break;
+      }
+    }
+    SPIEL_CHECK_NE(chosen_action, kInvalidAction);
+    state->ApplyAction(chosen_action);
+  }
+
+  SPIEL_CHECK_TRUE(state->IsTerminal());
+  SPIEL_CHECK_TRUE(
+      down_cast<const ChessState*>(state.get())->IsRepetitionDraw());
+}
+
 }  // namespace
 }  // namespace chess
 }  // namespace open_spiel
@@ -330,4 +425,7 @@ int main(int argc, char** argv) {
   open_spiel::chess::MoveConversionTests();
   open_spiel::chess::SerializaitionTests();
   open_spiel::chess::BasicChess960Tests();
+  open_spiel::chess::Chess960SerializationRootIsChanceNodeTest();
+  open_spiel::chess::Chess960SerializationRootIsSpecificStartingPositionTest();
+  open_spiel::chess::ThreeFoldRepetitionTestWithEnPassant();
 }

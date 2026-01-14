@@ -15,8 +15,6 @@ add_library (utils OBJECT
   lru_cache.h
   random.h
   random.cc
-  run_python.h
-  run_python.cc
   serializable_circular_buffer.h
   serialization.h
   stats.h
@@ -62,17 +60,6 @@ add_test(lru_cache_test lru_cache_test)
 add_executable(random_test random_test.cc ${OPEN_SPIEL_OBJECTS}
         $<TARGET_OBJECTS:tests>)
 add_test(random_test random_test)
-
-if (OPEN_SPIEL_BUILD_WITH_PYTHON)
-  add_executable(run_python_test run_python_test.cc ${OPEN_SPIEL_OBJECTS}
-                 $<TARGET_OBJECTS:tests>)
-  add_test(run_python_test run_python_test
-           --python_command=${Python3_EXECUTABLE})
-  set_property(TEST run_python_test
-      PROPERTY ENVIRONMENT
-      PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../..;
-      TEST_SRCDIR=${CMAKE_CURRENT_SOURCE_DIR}/../..)
-endif()
 
 if (OPEN_SPIEL_BUILD_WITH_LIBNOP)
   add_executable(serializable_circular_buffer_test

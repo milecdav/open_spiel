@@ -15,6 +15,7 @@
 #include "open_spiel/spiel.h"
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -49,6 +50,7 @@ constexpr const char* kSerializeMetaSectionHeader = "[Meta]";
 constexpr const char* kSerializeGameSectionHeader = "[Game]";
 constexpr const char* kSerializeGameRNGStateSectionHeader = "[GameRNGState]";
 constexpr const char* kSerializeStateSectionHeader = "[State]";
+constexpr const char* kSerializeStartingState = "starting_state=";
 
 // Returns the available parameter keys, to be used as a utility function.
 std::string ListValidParameters(
@@ -154,7 +156,8 @@ std::shared_ptr<const Game> GameRegisterer::CreateByName(
     const std::string& short_name, const GameParameters& params) {
   // Check if it's a game with a known issue. If so, output a warning.
   if (absl::c_linear_search(GamesWithKnownIssues(), short_name)) {
-    std::cerr << "Warning! This game has known issues. Please see the games "
+    std::cerr << "Warning! The implementation of '" << short_name
+              << "' has known issues. Please see the games "
               << "list on github or the code for details." << std::endl;
   }
 
@@ -171,12 +174,18 @@ std::shared_ptr<const Game> GameRegisterer::CreateByName(
   }
 }
 
-std::vector<std::string> GameRegisterer::RegisteredNames() {
+std::vector<std::string> GameRegisterer::GameTypesToShortNames(
+    const std::vector<GameType>& game_types) {
   std::vector<std::string> names;
-  for (const auto& key_val : factories()) {
-    names.push_back(key_val.first);
+  names.reserve(game_types.size());
+  for (const auto& game_type : game_types) {
+    names.push_back(game_type.short_name);
   }
   return names;
+}
+
+std::vector<std::string> GameRegisterer::RegisteredNames() {
+  return GameTypesToShortNames(RegisteredGames());
 }
 
 std::vector<std::string> GameRegisterer::GamesWithKnownIssues() {
@@ -189,6 +198,20 @@ std::vector<GameType> GameRegisterer::RegisteredGames() {
     games.push_back(key_val.second.first);
   }
   return games;
+}
+
+std::vector<GameType> GameRegisterer::RegisteredConcreteGames() {
+  std::vector<GameType> games;
+  for (const auto& key_val : factories()) {
+    if (key_val.second.first.is_concrete) {
+      games.push_back(key_val.second.first);
+    }
+  }
+  return games;
+}
+
+std::vector<std::string> GameRegisterer::RegisteredConcreteNames() {
+  return GameTypesToShortNames(RegisteredConcreteGames());
 }
 
 bool GameRegisterer::IsValidName(const std::string& short_name) {
@@ -269,7 +292,8 @@ State::State(std::shared_ptr<const Game> game)
     : game_(game),
       num_distinct_actions_(game->NumDistinctActions()),
       num_players_(game->NumPlayers()),
-      move_number_(0) {}
+      move_number_(0),
+      starting_state_str_() {}
 
 void NormalizePolicy(ActionsAndProbs* policy) {
   const double sum = absl::c_accumulate(
@@ -333,7 +357,12 @@ std::string State::Serialize() const {
   SPIEL_CHECK_NE(game_->GetType().chance_mode,
                  GameType::ChanceMode::kSampledStochastic);
   SPIEL_CHECK_NE(game_->GetType().dynamics, GameType::Dynamics::kMeanField);
-  return absl::StrCat(absl::StrJoin(History(), "\n"), "\n");
+  std::string starting_state_str;
+  if (!starting_state_str_.empty()) {
+    starting_state_str = absl::StrCat(
+        kSerializeStartingState, starting_state_str_, "\n");
+  }
+  return absl::StrCat(starting_state_str, absl::StrJoin(History(), "\n"), "\n");
 }
 
 Action State::StringToAction(Player player,
@@ -359,13 +388,12 @@ void State::ApplyAction(Action action_id) {
 
 void State::ApplyActionWithLegalityCheck(Action action_id) {
   std::vector<Action> legal_actions = LegalActions();
-  if (absl::c_find(legal_actions, action_id) == legal_actions.end()) {
-    Player cur_player = CurrentPlayer();
-    SpielFatalError(
-        absl::StrCat("Current player ", cur_player, " calling ApplyAction ",
-                     "with illegal action (", action_id, "): ",
-                     ActionToString(cur_player, action_id)));
-  }
+  SPIEL_CHECK_TRUE_WSI(
+      absl::c_find(legal_actions, action_id) != legal_actions.end(),
+      absl::StrCat("Current player ", CurrentPlayer(), " calling ApplyAction ",
+                   "with illegal action (", action_id,
+                   "): ", ActionToString(CurrentPlayer(), action_id)),
+      *this->GetGame(), *this);
   ApplyAction(action_id);
 }
 
@@ -383,15 +411,21 @@ void State::ApplyActions(const std::vector<Action>& actions) {
 void State::ApplyActionsWithLegalityChecks(const std::vector<Action>& actions) {
   for (Player player = 0; player < actions.size(); ++player) {
     std::vector<Action> legal_actions = LegalActions(player);
-    if (!legal_actions.empty() &&
-        absl::c_find(legal_actions, actions[player]) == legal_actions.end()) {
-      SpielFatalError(
-          absl::StrCat("Player ", player, " calling ApplyAction ",
-                       "with illegal action (", actions[player], "): ",
-                       ActionToString(player, actions[player])));
+    if (legal_actions.empty()) {
+      continue;
     }
+    SPIEL_CHECK_TRUE_WSI(
+        absl::c_find(legal_actions, actions[player]) != legal_actions.end(),
+        absl::StrCat("Player ", player, " calling ApplyActions ",
+                     "with illegal action (", actions[player],
+                     "): ", ActionToString(player, actions[player])),
+        *this->GetGame(), *this);
   }
   ApplyActions(actions);
+}
+
+void State::ApplyActionStruct(const ActionStruct& action_struct) {
+  ApplyAction(StructToAction(action_struct));
 }
 
 std::vector<int> State::LegalActionsMask(Player player) const {
@@ -426,12 +460,19 @@ std::unique_ptr<State> Game::DeserializeState(const std::string& str) const {
   SPIEL_CHECK_NE(game_type_.dynamics,
                  GameType::Dynamics::kMeanField);
 
-  std::unique_ptr<State> state = NewInitialState();
-  if (str.empty()) {
-    return state;
-  }
+  int serialize_starting_state_str_len = std::strlen(kSerializeStartingState);
   std::vector<std::string> lines = absl::StrSplit(str, '\n');
-  for (int i = 0; i < lines.size(); ++i) {
+  std::unique_ptr<State> state;
+  bool skip_first_line = false;
+  if (!lines.empty() && lines[0].find(kSerializeStartingState) == 0) {
+    std::string starting_state_str =
+        lines[0].substr(serialize_starting_state_str_len);
+    state = NewInitialState(starting_state_str);
+    skip_first_line = true;
+  } else {
+    state = NewInitialState();
+  }
+  for (int i = skip_first_line ? 1 : 0; i < lines.size(); ++i) {
     if (lines[i].empty()) continue;
     if (state->IsSimultaneousNode()) {
       std::vector<Action> actions;
@@ -814,6 +855,23 @@ void State::InformationStateTensor(Player player,
   // Retained for backwards compatibility.
   values->resize(game_->InformationStateTensorSize());
   InformationStateTensor(player, absl::MakeSpan(*values));
+}
+
+bool State::IsInitialNonChanceState() const {
+  if (IsChanceNode()) {
+    return false;
+  }
+  SPIEL_CHECK_EQ(GetGame()->GetType().chance_mode,
+                 GameType::ChanceMode::kExplicitStochastic);
+  std::vector<Action> history = History();
+  std::unique_ptr<State> state = GetGame()->NewInitialState();
+  for (Action action : history) {
+    if (!state->IsChanceNode()) {
+      return false;
+    }
+    state->ApplyAction(action);
+  }
+  return true;
 }
 
 bool State::PlayerAction::operator==(const PlayerAction& other) const {

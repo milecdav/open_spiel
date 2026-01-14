@@ -14,16 +14,19 @@
 #include "open_spiel/games/bargaining/bargaining.h"
 
 #include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <iostream>
 #include <memory>
 #include <numeric>
-#include <random>
+#include <string>
 #include <utility>
+#include <vector>
 
+#include "open_spiel/abseil-cpp/absl/strings/numbers.h"  // For absl::SimpleAtoi
 #include "open_spiel/abseil-cpp/absl/strings/str_cat.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_join.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_split.h"
+#include "open_spiel/game_parameters.h"
+#include "open_spiel/observer.h"
 #include "open_spiel/spiel.h"
 #include "open_spiel/spiel_globals.h"
 #include "open_spiel/spiel_utils.h"
@@ -35,24 +38,26 @@ namespace bargaining {
 namespace {
 
 // Facts about the game
-const GameType kGameType{/*short_name=*/"bargaining",
-                         /*long_name=*/"Bargaining",
-                         GameType::Dynamics::kSequential,
-                         GameType::ChanceMode::kExplicitStochastic,
-                         GameType::Information::kImperfectInformation,
-                         GameType::Utility::kGeneralSum,
-                         GameType::RewardModel::kTerminal,
-                         /*max_num_players=*/kNumPlayers,
-                         /*min_num_players=*/kNumPlayers,
-                         /*provides_information_state_string=*/true,
-                         /*provides_information_state_tensor=*/true,
-                         /*provides_observation_string=*/true,
-                         /*provides_observation_tensor=*/true,
-                         /*parameter_specification=*/
-                         {{"instances_file", GameParameter("")},
-                          {"max_turns", GameParameter(kDefaultMaxTurns)},
-                          {"discount", GameParameter(kDefaultDiscount)},
-                          {"prob_end", GameParameter(kDefaultProbEnd)}}};
+const GameType kGameType{
+    /*short_name=*/"bargaining",
+    /*long_name=*/"Bargaining",
+    GameType::Dynamics::kSequential,
+    GameType::ChanceMode::kExplicitStochastic,
+    GameType::Information::kImperfectInformation,
+    GameType::Utility::kGeneralSum,
+    GameType::RewardModel::kTerminal,
+    /*max_num_players=*/kNumPlayers,
+    /*min_num_players=*/kNumPlayers,
+    /*provides_information_state_string=*/true,
+    /*provides_information_state_tensor=*/true,
+    /*provides_observation_string=*/true,
+    /*provides_observation_tensor=*/true,
+    /*parameter_specification=*/
+    {{"instances_file", GameParameter("")},
+     {"max_num_instances", GameParameter(kDefaultNumInstances)},
+     {"max_turns", GameParameter(kDefaultMaxTurns)},
+     {"discount", GameParameter(kDefaultDiscount)},
+     {"prob_end", GameParameter(kDefaultProbEnd)}}};
 
 static std::shared_ptr<const Game> Factory(const GameParameters& params) {
   return std::shared_ptr<const Game>(new BargainingGame(params));
@@ -63,20 +68,27 @@ REGISTER_SPIEL_GAME(kGameType, Factory);
 RegisterSingleTensorObserver single_tensor(kGameType.short_name);
 }  // namespace
 
+
+std::string format_values(const std::vector<int>& values) {
+  return absl::StrCat("Book: ", values[0], ", ",
+                      "Hat: ", values[1], ", ",
+                      "Basketball: ", values[2]);
+}
+
 std::string Instance::ToString() const {
-  return absl::StrCat(absl::StrJoin(pool, ","), " ",
-                      absl::StrJoin(values[0], ","), " ",
-                      absl::StrJoin(values[1], ","));
+  return absl::StrCat(format_values(pool), " ",
+                      format_values(values[0]), " ",
+                      format_values(values[1]));
 }
 
 std::string Instance::ToPrettyString() const {
-  return absl::StrCat("Pool:    ", absl::StrJoin(pool, " "), "\n",
-                      "P0 vals: ", absl::StrJoin(values[0], " "), "\n",
-                      "P1 vals: ", absl::StrJoin(values[1], " "), "\n");
+  return absl::StrCat("Pool:    ", format_values(pool), "\n",
+                      "P0 vals: ", format_values(values[0]), "\n",
+                      "P1 vals: ", format_values(values[1]), "\n");
 }
 
 std::string Offer::ToString() const {
-  return absl::StrCat("Offer: ", absl::StrJoin(quantities, " "));
+  return absl::StrCat("Offer: ", format_values(quantities));
 }
 
 std::string BargainingState::ActionToString(Player player,
@@ -121,9 +133,9 @@ std::string BargainingState::ObservationString(Player player) const {
     return "Initial chance node";
   }
 
-  std::string str = absl::StrCat("Pool: ", absl::StrJoin(instance_.pool, " "));
+  std::string str = absl::StrCat("Pool: ", format_values(instance_.pool));
   absl::StrAppend(&str,
-                  "\nMy values: ", absl::StrJoin(instance_.values[player], " "),
+                  "\nMy values: ", format_values(instance_.values[player]),
                   "\n");
   absl::StrAppend(&str, "Agreement reached? ", agreement_reached_, "\n");
   absl::StrAppend(&str, "Number of offers: ", offers_.size(), "\n");
@@ -143,9 +155,9 @@ std::string BargainingState::InformationStateString(Player player) const {
     return "Initial chance node";
   }
 
-  std::string str = absl::StrCat("Pool: ", absl::StrJoin(instance_.pool, " "));
+  std::string str = absl::StrCat("Pool: ", format_values(instance_.pool));
   absl::StrAppend(&str,
-                  "\nMy values: ", absl::StrJoin(instance_.values[player], " "),
+                  "\nMy values: ", format_values(instance_.values[player]),
                   "\n");
   absl::StrAppend(&str, "Agreement reached? ", agreement_reached_, "\n");
   for (int i = 0; i < offers_.size(); ++i) {
@@ -469,6 +481,24 @@ void BargainingGame::ParseInstancesString(const std::string& instances_string) {
             absl::SimpleAtoi(p2values_parts[i], &instance.values[1][i]));
       }
       all_instances_.push_back(instance);
+      instance_map_[instance.ToString()] = all_instances_.size() - 1;
+      std::vector<std::pair<int, std::string>> player_data = {
+        {0, absl::StrCat("player_0,", parts[0], ",", parts[1])},
+        {1, absl::StrCat("player_1,", parts[0], ",", parts[2])}
+      };
+
+      for (const auto& [player, key] : player_data) {
+        if (possible_opponent_values_.contains(key)) {
+          possible_opponent_values_[key].push_back(instance.values[1-player]);
+        } else {
+          possible_opponent_values_[key] = {instance.values[1-player]};
+        }
+      }
+
+      // Stop parsing instances once we've reached the max number.
+      if (all_instances_.size() >= max_num_instances_) {
+        break;
+      }
     }
   }
 }
@@ -480,6 +510,7 @@ void BargainingGame::CreateOffers() {
     if (std::accumulate(cur_offer.begin(), cur_offer.end(), 0) <=
         kPoolMaxNumItems) {
       all_offers_.push_back(Offer(cur_offer));
+      offer_map_[all_offers_.back().ToString()] = all_offers_.size() - 1;
     }
 
     // Try adding a digit to the left-most, keep going until you can. Then
@@ -500,14 +531,21 @@ void BargainingGame::CreateOffers() {
 
 BargainingGame::BargainingGame(const GameParameters& params)
     : Game(kGameType, params),
+      max_num_instances_(
+          ParameterValue<int>("max_num_instances", kDefaultNumInstances)),
       max_turns_(ParameterValue<int>("max_turns", kDefaultMaxTurns)),
       discount_(ParameterValue<double>("discount", kDefaultDiscount)),
       prob_end_(ParameterValue<double>("prob_end", kDefaultProbEnd)) {
-  std::string filename = ParameterValue<std::string>("instances_file", "");
-  if (!filename.empty()) {
+  std::string filename = ParameterValue<std::string>(
+      "instances_file", ""
+  );
+  if (open_spiel::file::Exists(filename)) {
     ParseInstancesFile(filename);
   } else {
-    ParseInstancesString(kDefaultInstancesString);
+    if (!filename.empty()) {
+      std::cerr << "Failed to parse instances file: " << filename << " ";
+    }
+    ParseInstancesString(BargainingInstances1000());
   }
   CreateOffers();
 }
@@ -515,7 +553,14 @@ BargainingGame::BargainingGame(const GameParameters& params)
 std::string BargainingGame::ActionToString(Player player,
                                            Action move_id) const {
   if (player == kChancePlayerId) {
-    return absl::StrCat("Chance outcome ", move_id);
+    if (move_id == ContinueOutcome()){
+      return "Continue";
+    }
+    if (move_id == EndOutcome()) {
+      return "End";
+    }
+    const Instance& instance = GetInstance(move_id);
+    return absl::StrCat("Sample game instance:\n", instance.ToPrettyString());
   } else if (move_id < all_offers_.size()) {
     return all_offers_[move_id].ToString();
   } else {
@@ -560,5 +605,17 @@ std::vector<int> BargainingGame::InformationStateTensorShape() const {
   };
 }
 
+std::vector<std::vector<int>> BargainingGame::GetPossibleOpponentValues(
+    int player_id,
+    const std::vector<int>& pool,
+    const std::vector<int>& values) const {
+  std::string key = absl::StrCat(
+      "player_", player_id, ",", absl::StrJoin(pool, ","),
+      ",", absl::StrJoin(values, "," ));
+  if (possible_opponent_values_.contains(key)) {
+    return possible_opponent_values_.at(key);
+  }
+  return {};
+}
 }  // namespace bargaining
 }  // namespace open_spiel

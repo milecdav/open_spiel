@@ -17,6 +17,8 @@
 # The following should be easy to setup as a submodule:
 # https://git-scm.com/docs/git-submodule
 
+export OPEN_SPIEL_ABSL_VERSION=${OPEN_SPIEL_ABSL_VERSION:-"20250814.1"}
+
 die() {
   echo "$*" 1>&2
   exit 1
@@ -32,6 +34,24 @@ fi
 ${PYBIN} --version
 
 MYDIR="$(dirname "$(realpath "$0")")"
+
+# This function is only run on Github Actions!
+function ci_check_install_python() {
+  if [[ ! "$CI" ]]; then
+    echo "Only run this function on Github Actions!"
+    exit 1
+  fi
+
+  # Need the trap here to make sure the return value of grep being 1 doesn't cause set -e to fail
+  # https://stackoverflow.com/questions/77047127/bash-capture-stderr-of-a-function-while-using-trap
+  trap 'ret=0; output=$(brew list --versions | grep "python ${OS_PYTHON_VERSION}") || ret="$?"; trap - RETURN' RETURN
+  if [[ "$output" = "" ]]; then
+    # The --force is needed because there seems to be a phantom installation in /usr/local/
+    # and errors show up for files that already exist
+    brew install --force "python@${OS_PYTHON_VERSION}"
+  fi
+  return 0
+}
 
 # Calling this file from the project root is not allowed,
 # as all the paths here are hard-coded to be relative to it.
@@ -59,7 +79,7 @@ DOWNLOAD_CACHE_DIR=${DOWNLOAD_CACHE_DIR:-$DEFAULT_DOWNLOAD_CACHE_DIR}
 # Create the cache directory.
 [[ -d "${DOWNLOAD_CACHE_DIR}" ]] || mkdir "${DOWNLOAD_CACHE_DIR}"
 
-# 1. Clone the external dependencies before installing systen packages, to make
+# 1. Clone the external dependencies before installing system packages, to make
 # sure they are present even if later commands fail.
 #
 # We do not use submodules because the CL versions are stored within Git
@@ -101,7 +121,7 @@ function cached_clone() {
 
 DIR="./pybind11"
 if [[ ! -d ${DIR} ]]; then
-  cached_clone -b smart_holder --single-branch --depth 1 https://github.com/pybind/pybind11.git ${DIR}
+  cached_clone -b master --single-branch --depth 1 https://github.com/pybind/pybind11.git ${DIR}
 fi
 
 # The official https://github.com/dds-bridge/dds.git seems to not accept PR,
@@ -113,7 +133,23 @@ fi
 
 DIR="open_spiel/abseil-cpp"
 if [[ ! -d ${DIR} ]]; then
-  cached_clone -b '20230125.0' --single-branch --depth 1 https://github.com/abseil/abseil-cpp.git ${DIR}
+  cached_clone -b "${OPEN_SPIEL_ABSL_VERSION}" --single-branch --depth 1 https://github.com/abseil/abseil-cpp.git ${DIR}
+fi
+
+DIR="open_spiel/json"
+if [[ ! -d ${DIR} ]]; then
+  cached_clone -b 'master' https://github.com/nlohmann/json.git ${DIR}
+  pushd ${DIR}
+  git checkout '9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03'
+  popd
+fi
+
+DIR="open_spiel/pybind11_json"
+if [[ ! -d ${DIR} ]]; then
+  cached_clone -b 'master' https://github.com/pybind/pybind11_json.git ${DIR}
+  pushd ${DIR}
+  git checkout 'd0bf434be9d287d73a963ff28745542daf02c08f'
+  popd
 fi
 
 DIR="open_spiel/pybind11_abseil"
@@ -251,12 +287,13 @@ if [[ "$OSTYPE" == "linux-gnu" ]]; then
     EXT_DEPS="${EXT_DEPS} rustc cargo"
   fi
 
-  APT_GET=`which apt-get`
-  if [ "$APT_GET" = "" ]
+  if command -v apt-get &> /dev/null
   then
-     echo "This script assumes a Debian-based Linux distribution. Please install these packages manually or using your distribution's package manager:"
-     echo "$EXT_DEPS"
-     exit 1
+      APT_GET=$(command -v apt-get)
+  else
+    echo "This script assumes a Debian-based Linux distribution. Please install these packages manually or using your distribution's package manager:"
+    echo "$EXT_DEPS"
+    exit 1
   fi
 
   # We install the packages only if they are not present yet.
@@ -288,11 +325,8 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then  # Mac OSX
   # On Github Actions, macOS comes with Python 3.9.
   # We want to test multiple Python versions determined by OS_PYTHON_VERSION.
   if [[ "$CI" ]]; then
-    # Only install the python version if it's not present. There are issues otherwise.
-    if [[ `brew list python@${OS_PYTHON_VERSION}; echo $?` == 0 ]]; then
-      brew install "python@${OS_PYTHON_VERSION}"
-    fi
-    # Uninstall Python 3.9 if we need to.
+    # Set brew to use the specific python version
+    ci_check_install_python
     brew link --force --overwrite "python@${OS_PYTHON_VERSION}"
   fi
   `python3 -c "import tkinter" > /dev/null 2>&1` || brew install tcl-tk || echo "** Warning: failed 'brew install tcl-tk' -- continuing"

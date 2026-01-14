@@ -15,13 +15,17 @@
 #ifndef OPEN_SPIEL_GAMES_BARGAINING_H_
 #define OPEN_SPIEL_GAMES_BARGAINING_H_
 
+#include <functional>
 #include <memory>
-#include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "open_spiel/abseil-cpp/absl/container/flat_hash_map.h"
+#include "open_spiel/abseil-cpp/absl/types/span.h"
 #include "open_spiel/spiel.h"
+#include "open_spiel/spiel_utils.h"
+#include "open_spiel/game_parameters.h"
 
 // A simple multi-issue bargaining game, based on [1,2]. The rules are based
 // on the description of Section 2.2 of [1]:
@@ -43,15 +47,20 @@
 //     2015. Toward Natural Turn-taking in a Virtual Human Negotiation Agent
 //
 // Parameters:
-//     "instances_file" string    The file containing the boards (default: "")
-//     "discount"       double    Discount factor multiplied each turn after
-//                                turn 2, applied to (multiplied to reduce) the
-//                                returns (default = 1.0).
-//     "max_turns"      integer   Maximum total turns before the game ends
-//                                (default = 10).
-//     "prob_end"       double    Probability of the game ending after each
-//                                action (only after each player has taken
-//                                one turn each)  (default = 0.0).
+//     "instances_file"    string   The file containing the boards (default: "")
+//     "max_num_instances" int      The maximum number of instances to use from
+//                                  the file or the builtin default database
+//                                  (default = 1000). Cannot be greater than the
+//                                  number of instances in the file or default
+//                                  database.
+//     "discount"         double    Discount factor multiplied each turn after
+//                                  turn 2, applied to (multiplied to reduce)
+//                                  the returns (default = 1.0).
+//     "max_turns"        integer   Maximum total turns before the game ends
+//                                  (default = 10).
+//     "prob_end"          double   Probability of the game ending after each
+//                                  action (only after each player has taken
+//                                  one turn each)  (default = 0.0).
 
 namespace open_spiel {
 namespace bargaining {
@@ -64,21 +73,16 @@ constexpr int kNumPlayers = 2;
 constexpr double kDefaultDiscount = 1.0;
 constexpr int kDefaultMaxTurns = 10;
 constexpr double kDefaultProbEnd = 0.0;
+constexpr int kDefaultNumInstances = 1000;
 
-// Default 10-instance database used for tests. See
-// bargaining_instance_generator.cc to create your own.
-// Format is: pool items, p1 values, p2 values.
-constexpr const char* kDefaultInstancesString =
-    "1,2,3 8,1,0 4,0,2\n"
-    "1,4,1 4,1,2 2,2,0\n"
-    "2,2,1 1,1,6 0,4,2\n"
-    "1,4,1 9,0,1 2,2,0\n"
-    "1,4,1 5,1,1 0,1,6\n"
-    "4,1,1 2,1,1 1,0,6\n"
-    "3,1,1 1,4,3 0,2,8\n"
-    "1,1,3 0,1,3 1,3,2\n"
-    "1,3,1 2,2,2 10,0,0\n"
-    "1,2,2 2,3,1 4,0,3\n";
+// Default 1000-instance. See bargaining_instances1000.cc for details or
+// bargaining_instances_generator to create your own.
+//
+// Format is, one per line <pool values> <p1 values> <p2 values>
+// where <pool values> is a comma-separated list of integers, and
+// <p1 values> and <p2 values> are also comma-separated lists of integers.
+// E.g. "1,2,3 8,1,0 4,0,2"
+const char* BargainingInstances1000();
 
 struct Instance {
   std::vector<std::vector<int>> values;
@@ -181,6 +185,21 @@ class BargainingGame : public Game {
   const Offer& GetOffer(int num) const { return all_offers_[num]; }
   std::pair<Offer, Action> GetOfferByQuantities(
       const std::vector<int>& quantities) const;
+  int GetInstanceIndex(const Instance& instance) const {
+    if (!instance_map_.contains(instance.ToString())) {
+      return -1;
+    }
+    return instance_map_.at(instance.ToString());
+  }
+  int GetOfferIndex(const Offer& offer) const {
+    if (!offer_map_.contains(offer.ToString())) {
+      return -1;
+    }
+    return offer_map_.at(offer.ToString());
+  }
+  std::vector<std::vector<int>> GetPossibleOpponentValues(
+      int player_id, const std::vector<int>& pool,
+      const std::vector<int>& values) const;
 
  private:
   void ParseInstancesFile(const std::string& filename);
@@ -189,6 +208,11 @@ class BargainingGame : public Game {
 
   std::vector<Instance> all_instances_;
   std::vector<Offer> all_offers_;
+  absl::flat_hash_map<std::string, int> offer_map_;
+  absl::flat_hash_map<std::string, int> instance_map_;
+  absl::flat_hash_map<std::string, std::vector<std::vector<int>>>
+      possible_opponent_values_;
+  const int max_num_instances_;
   const int max_turns_;
   const double discount_;
   const double prob_end_;

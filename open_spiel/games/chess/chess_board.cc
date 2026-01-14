@@ -322,20 +322,16 @@ std::string Move::ToSAN(const ChessBoard &board) const {
     absl::StrAppend(&move_text, SquareToString(to));
 
     // Encode the promotion type if we have a promotion.
-    switch (promotion_type) {
-      case PieceType::kEmpty:
-        break;
-      case PieceType::kQueen:
-      case PieceType::kRook:
-      case PieceType::kBishop:
-      case PieceType::kKnight:
-        absl::StrAppend(&move_text, "=", PieceTypeToString(promotion_type));
-        break;
-      case PieceType::kKing:
-      case PieceType::kPawn:
+    if (promotion_type != PieceType::kEmpty) {
+      if (promotion_type == PieceType::kPawn ||
+          (promotion_type == PieceType::kKing && !board.AllowKingPromotion())) {
         std::cerr << "Cannot promote to " << PieceTypeToString(promotion_type)
-                  << "! Only Q, R, B, N are allowed" << std::endl;
-        break;
+                  << "! Only Q, R, B, N"
+                  << (board.AllowKingPromotion() ? " K" : "") << " are allowed"
+                  << std::endl;
+      } else {
+        absl::StrAppend(&move_text, "=", PieceTypeToString(promotion_type));
+      }
     }
   }
 
@@ -364,10 +360,11 @@ std::string Move::ToSAN(const ChessBoard &board) const {
 }
 
 ChessBoard::ChessBoard(int board_size, bool king_in_check_allowed,
-                       bool allow_pass_move)
+                       bool allow_pass_move, bool allow_king_promotion)
     : board_size_(board_size),
       king_in_check_allowed_(king_in_check_allowed),
       allow_pass_move_(allow_pass_move),
+      allow_king_promotion_(allow_king_promotion),
       to_play_(Color::kWhite),
       ep_square_(kInvalidSquare),
       irreversible_move_counter_(0),
@@ -377,8 +374,8 @@ ChessBoard::ChessBoard(int board_size, bool king_in_check_allowed,
 }
 
 /*static*/ absl::optional<ChessBoard> ChessBoard::BoardFromFEN(
-    const std::string &fen, int board_size,
-    bool king_in_check_allowed, bool allow_pass_move) {
+    const std::string& fen, int board_size, bool king_in_check_allowed,
+    bool allow_pass_move, bool allow_king_promotion) {
   /* An FEN string includes a board position, side to play, castling
    * rights, ep square, 50 moves clock, and full move number. In that order.
    *
@@ -390,7 +387,8 @@ ChessBoard::ChessBoard(int board_size, bool king_in_check_allowed,
    *
    * Many FEN strings don't have the last two fields.
    */
-  ChessBoard board(board_size, king_in_check_allowed, allow_pass_move);
+  ChessBoard board(board_size, king_in_check_allowed, allow_pass_move,
+                   allow_king_promotion);
 
   std::vector<std::string> fen_parts = absl::StrSplit(fen, ' ');
 
@@ -517,7 +515,12 @@ ChessBoard::ChessBoard(int board_size, bool king_in_check_allowed,
                 << std::endl;
       return absl::nullopt;
     }
-    board.SetEpSquare(*maybe_ep_square);
+    // Only set the en-passant square if it's being threatened. This is to
+    // prevent changing the hash of the board for the purposes of the
+    // repetition rule.
+    if (board.EpSquareThreatened(*maybe_ep_square)) {
+      board.SetEpSquare(*maybe_ep_square);
+    }
   }
 
   board.SetIrreversibleMoveCounter(std::stoi(fifty_clock));
@@ -642,6 +645,9 @@ void ChessBoard::GeneratePseudoLegalMoves(
                     YIELD(Move(sq, to, piece, PieceType::kRook));
                     YIELD(Move(sq, to, piece, PieceType::kBishop));
                     YIELD(Move(sq, to, piece, PieceType::kKnight));
+                    if (AllowKingPromotion()) {
+                      YIELD(Move(sq, to, piece, PieceType::kKing));
+                    }
                   } else {
                     YIELD(Move(sq, to, piece));
                   }
@@ -654,6 +660,9 @@ void ChessBoard::GeneratePseudoLegalMoves(
                     YIELD(Move(sq, to, piece, PieceType::kRook));
                     YIELD(Move(sq, to, piece, PieceType::kBishop));
                     YIELD(Move(sq, to, piece, PieceType::kKnight));
+                    if (AllowKingPromotion()) {
+                      YIELD(Move(sq, to, piece, PieceType::kKing));
+                    }
                   } else {
                     YIELD(Move(sq, to, piece));
                   }
@@ -1257,12 +1266,17 @@ void ChessBoard::ApplyMove(const Move &move) {
   }
 
   // 4. Double push
+  SetEpSquare(kInvalidSquare);
   if (moving_piece.type == PieceType::kPawn &&
       abs(move.from.y - move.to.y) == 2) {
-    SetEpSquare(Square{move.from.x,
-                       static_cast<int8_t>((move.from.y + move.to.y) / 2)});
-  } else {
-    SetEpSquare(kInvalidSquare);
+    Square ep_square{move.from.x,
+                     static_cast<int8_t>((move.from.y + move.to.y) / 2)};
+    // Only set the en-passant square if it's being threatened. This is to
+    // prevent changing the hash of the board for the purposes of the
+    // repetition rule.
+    if (EpSquareThreatened(ep_square)) {
+      SetEpSquare(ep_square);
+    }
   }
 
   if (to_play_ == Color::kBlack) {
@@ -1995,10 +2009,50 @@ void ChessBoard::SetIrreversibleMoveCounter(int c) {
 
 void ChessBoard::SetMovenumber(int move_number) { move_number_ = move_number; }
 
+bool ChessBoard::EpSquareThreatened(Square ep_square) const {
+  // If the en-passant square is set, look to see if there are pawns of the
+  // opponent that could capture via en-passant.
+  if (ep_square == kInvalidSquare) {
+    return false;
+  }
+
+  Color ep_color = Color::kEmpty;
+  Offset offset1 = {0, 0};
+  Offset offset2 = {0, 0};
+  if (ep_square.y == 2) {
+    ep_color = Color::kWhite;
+    offset1 = {-1, +1};
+    offset2 = {+1, +1};
+  } else if (ep_square.y == 5) {
+    ep_color = Color::kBlack;
+    offset1 = {-1, -1};
+    offset2 = {+1, -1};
+  } else {
+    SpielFatalError(absl::StrCat("Invalid en passant square: ", ep_square.y));
+  }
+
+  Square sq1 = ep_square + offset1;
+  if (InBoardArea(sq1) && IsEnemy(sq1, ep_color) &&
+      at(sq1).type == PieceType::kPawn) {
+    return true;
+  }
+
+  Square sq2 = ep_square + offset2;
+  if (InBoardArea(sq2) && IsEnemy(sq2, ep_color) &&
+      at(sq2).type == PieceType::kPawn) {
+    return true;
+  }
+
+  return false;
+}
+
 void ChessBoard::SetEpSquare(Square sq) {
   static const ZobristTableU64<kMaxBoardSize, kMaxBoardSize> kZobristValues(
       /*seed=*/837261);
 
+  // Only update the hash if the en-passant square is threatened. This is to
+  // ensure that the state is properly captured for three-fold repetition
+  // detection.
   if (EpSquare() != kInvalidSquare) {
     // Remove en passant square if there was one.
     zobrist_hash_ ^= kZobristValues[EpSquare().x][EpSquare().y];

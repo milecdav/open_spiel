@@ -70,7 +70,9 @@ if(APPLE)
   set (CMAKE_FIND_FRAMEWORK LAST)
 elseif(WIN32)
   # Setup for MSVC 2022.
-  # No changes needed. In particular: do not use -Wno-everything.
+  if(MSVC)
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17 /utf-8 /bigobj /DWIN32 /D_WINDOWS /GR /EHsc")
+  endif()
 else()
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-everything")
 endif()
@@ -107,8 +109,6 @@ endmacro()
 # List of all optional dependencies:
 openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_ACPC           OFF
   "Build against the Universal Poker library.")
-openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_GO             OFF
-  "Build with support for Golang API.")
 openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_HANABI         OFF
   "Build against the Hanabi game.")
 openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_JULIA          OFF
@@ -127,23 +127,17 @@ openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_GAMUT          OFF
   "Build with GAMUT generator integration.")
 openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_ORTOOLS        OFF
   "Build with C++ optimization library OR-Tools.")
-openspiel_optional_dependency(OPEN_SPIEL_BUILD_WITH_RUST           OFF
-  "Build with support for Rust API.")
 
 if (WIN32)
   openspiel_optional_dependency(OPEN_SPIEL_ENABLE_JAX              OFF
     "Enable JAX.")
   openspiel_optional_dependency(OPEN_SPIEL_ENABLE_PYTORCH          OFF
     "Enable PyTorch.")
-  openspiel_optional_dependency(OPEN_SPIEL_ENABLE_TENSORFLOW       OFF
-    "Enable Tensorflow.")
 else()
   openspiel_optional_dependency(OPEN_SPIEL_ENABLE_JAX             AUTO
     "Enable JAX.")
   openspiel_optional_dependency(OPEN_SPIEL_ENABLE_PYTORCH         AUTO
     "Enable PyTorch.")
-  openspiel_optional_dependency(OPEN_SPIEL_ENABLE_TENSORFLOW      AUTO
-    "Enable Tensorflow.")
 endif()
 
 openspiel_optional_dependency(OPEN_SPIEL_ENABLE_PYTHON_MISC       OFF
@@ -192,6 +186,20 @@ set(ABSL_PROPAGATE_CXX_STD ON)
 add_subdirectory (abseil-cpp)
 include_directories (abseil-cpp)
 
+# Similarly for json
+add_subdirectory (json)
+include_directories (json/include)
+
+# Find basic Python paths needed by C++ code (e.g. pybind11_json and pybind11_abseil).
+if (OPEN_SPIEL_BUILD_WITH_PYTHON)
+  find_package(Python3 COMPONENTS Interpreter Development)
+  include_directories(pybind11_abseil pybind11_json ../pybind11/include)
+  include_directories(${Python3_INCLUDE_DIRS})
+endif()
+
+# Include pybind11_abseil and pybind11_json
+include_directories (pybind11_json/include)
+
 # Just the core without any of the games
 add_library(open_spiel_core OBJECT ${OPEN_SPIEL_CORE_FILES})
 target_include_directories (
@@ -218,6 +226,7 @@ set (OPEN_SPIEL_OBJECTS
   $<TARGET_OBJECTS:game_transforms>
   $<TARGET_OBJECTS:bridge_double_dummy_solver>
   $<TARGET_OBJECTS:algorithms>
+  $<TARGET_OBJECTS:evaluation>
   $<TARGET_OBJECTS:utils>
   $<TARGET_OBJECTS:tests>
 )
@@ -276,17 +285,10 @@ include_directories(..)
 
 add_subdirectory (algorithms)
 add_subdirectory (bots)
+add_subdirectory (evaluation)
 add_subdirectory (examples)
 add_subdirectory (games)
 add_subdirectory (game_transforms)
-
-if (OPEN_SPIEL_BUILD_WITH_GO)
-  add_subdirectory(go)
-endif()
-
-if (OPEN_SPIEL_BUILD_WITH_RUST)
-  add_subdirectory(rust)
-endif()
 
 if (OPEN_SPIEL_BUILD_WITH_PYTHON)
   add_subdirectory (python)

@@ -26,18 +26,23 @@ using open_spiel::bargaining::BargainingState;
 using open_spiel::bargaining::Instance;
 using open_spiel::bargaining::Offer;
 
-PYBIND11_SMART_HOLDER_TYPE_CASTERS(BargainingGame);
-PYBIND11_SMART_HOLDER_TYPE_CASTERS(BargainingState);
-
 void open_spiel::init_pyspiel_games_bargaining(py::module& m) {
+  py::module_ bargaining = m.def_submodule("bargaining");
+  bargaining.attr("NumItemTypes") = &bargaining::kNumItemTypes;
+  bargaining.attr("PoolMinNumItems") = &bargaining::kPoolMinNumItems;
+  bargaining.attr("PoolMaxNumItems") = &bargaining::kPoolMaxNumItems;
+  bargaining.attr("TotalValueAllItems") = &bargaining::kTotalValueAllItems;
+
   py::class_<Instance>(m, "Instance")
       .def(py::init<>())
       .def_readwrite("pool", &Instance::pool)
-      .def_readwrite("values", &Instance::values);
+      .def_readwrite("values", &Instance::values)
+      .def("__str__", &Instance::ToString);
 
   py::class_<Offer>(m, "Offer")
       .def(py::init<>())
-      .def_readwrite("quantities", &Offer::quantities);
+      .def_readwrite("quantities", &Offer::quantities)
+      .def("__str__", &Offer::ToString);
 
   py::classh<BargainingState, State>(m, "BargainingState")
       .def("instance", &BargainingState::GetInstance)
@@ -58,10 +63,18 @@ void open_spiel::init_pyspiel_games_bargaining(py::module& m) {
           }));
 
   py::classh<BargainingGame, Game>(m, "BargainingGame")
+    .def("max_turns", &BargainingGame::max_turns)
+    .def("discount", &BargainingGame::discount)
+    .def("prob_end", &BargainingGame::prob_end)
     .def("all_instances", &BargainingGame::AllInstances)
+    .def("all_offers", &BargainingGame::AllOffers)
     // get_offer_by_quantities(quantities: List[int]). Returns a tuple
     // of (offer, OpenSpiel action)
     .def("get_offer_by_quantities", &BargainingGame::GetOfferByQuantities)
+    .def("get_instance_index", &BargainingGame::GetInstanceIndex)
+    .def("get_offer_index", &BargainingGame::GetOfferIndex)
+    .def("get_possible_opponent_values",
+          &BargainingGame::GetPossibleOpponentValues)
     // Pickle support
     .def(py::pickle(
         [](std::shared_ptr<const BargainingGame> game) {  // __getstate__

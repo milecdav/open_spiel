@@ -15,6 +15,8 @@
 #include "open_spiel/algorithms/alpha_zero_torch/alpha_zero.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -26,11 +28,14 @@
 #include "open_spiel/abseil-cpp/absl/algorithm/container.h"
 #include "open_spiel/abseil-cpp/absl/random/uniform_real_distribution.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_cat.h"
+#include "open_spiel/abseil-cpp/absl/strings/str_format.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_join.h"
 #include "open_spiel/abseil-cpp/absl/strings/str_split.h"
+#include "open_spiel/abseil-cpp/absl/strings/string_view.h"
 #include "open_spiel/abseil-cpp/absl/synchronization/mutex.h"
 #include "open_spiel/abseil-cpp/absl/time/clock.h"
 #include "open_spiel/abseil-cpp/absl/time/time.h"
+#include "open_spiel/abseil-cpp/absl/types/optional.h"
 #include "open_spiel/algorithms/alpha_zero_torch/device_manager.h"
 #include "open_spiel/algorithms/alpha_zero_torch/vpevaluator.h"
 #include "open_spiel/algorithms/alpha_zero_torch/vpnet.h"
@@ -62,8 +67,8 @@ struct StartInfo {
 StartInfo StartInfoFromLearnerJson(const std::string& path) {
   StartInfo start_info;
   file::File learner_file(path + "/learner.jsonl", "r");
-  std::vector<std::string> learner_lines = absl::StrSplit(
-      learner_file.ReadContents(), "\n");
+  std::vector<std::string> learner_lines =
+      absl::StrSplit(learner_file.ReadContents(), '\n');
   std::string last_learner_line;
 
   // Get the last non-empty line in learner.jsonl.
@@ -114,6 +119,7 @@ Trajectory PlayGame(Logger* logger, int game_num, const open_spiel::Game& game,
       open_spiel::ActionsAndProbs outcomes = state->ChanceOutcomes();
       open_spiel::Action action =
           open_spiel::SampleAction(outcomes, *rng).first;
+      history.push_back(state->ActionToString(state->CurrentPlayer(), action));
       state->ApplyAction(action);
     } else {
       open_spiel::Player player = state->CurrentPlayer();
@@ -217,25 +223,25 @@ class EvalResults {
 
   // How many evals per difficulty.
   int EvalCount() {
-    absl::MutexLock lock(&m_);
+    absl::MutexLock lock(m_);
     return eval_num_ / results_.size();
   }
 
   // Which eval to do next: difficulty, player0.
   std::pair<int, bool> Next() {
-    absl::MutexLock lock(&m_);
+    absl::MutexLock lock(m_);
     int next = eval_num_ % (results_.size() * 2);
     eval_num_ += 1;
     return {next / 2, next % 2};
   }
 
   void Add(int i, double value) {
-    absl::MutexLock lock(&m_);
+    absl::MutexLock lock(m_);
     results_[i].Add(value);
   }
 
   std::vector<double> AvgResults() {
-    absl::MutexLock lock(&m_);
+    absl::MutexLock lock(m_);
     std::vector<double> out;
     out.reserve(results_.size());
     for (const auto& result : results_) {

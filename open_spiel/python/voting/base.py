@@ -95,7 +95,7 @@ class PreferenceProfile(object):
       self._register_alternative(idx)
 
   def _register_alternative(self, alternative: AlternativeId):
-    """Add this alternative to interal recors if not already there."""
+    """Add this alternative to internal records if not already there."""
     idx = self._alternatives_dict.get(alternative)
     if idx is None:
       self._alternatives_ids.append(alternative)
@@ -232,6 +232,15 @@ class PreferenceProfile(object):
           mat[idx_i, idx_j] += vote.weight
     return mat
 
+  def pairwise_count_matrix(self) -> np.ndarray:
+    """Returns a matrix of pairwise for this profile.
+
+    For each entry (i,j) in the matrix, entry[i,j] is the number of votes in
+    the profile that contain both alternative i and alternative j.
+    """
+    pref_matrix = self.pref_matrix()
+    return pref_matrix + pref_matrix.T
+
   def margin_matrix(self) -> np.ndarray:
     """Returns the margin matrix for this profile.
 
@@ -330,6 +339,20 @@ class PreferenceProfile(object):
     """Sets the weight of all the votes to the specified value."""
     for i in range(len(self._votes)):
       self.set_weight(i, value)
+
+  def to_list_of_tuples(
+      self, convert_alternatives_to_strings: bool = False
+  ) -> List[Tuple[float, PreferenceList]]:
+    """Returns a list of (alternative, score) tuples."""
+    list_of_tuples = []
+    for vote in self._votes:
+      vote_lst = (
+          [str(a) for a in vote.vote]
+          if convert_alternatives_to_strings
+          else vote.vote
+      )
+      list_of_tuples.append((vote.weight, vote_lst))
+    return list_of_tuples
 
 
 class RankOutcome(object):
@@ -490,4 +513,3 @@ class AbstractVotingMethod(metaclass=abc.ABCMeta):
       profile: the profile to check.
     """
     return profile.num_votes() > 0 and profile.num_alternatives() > 0
-

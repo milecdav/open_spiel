@@ -11,21 +11,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tests for open_spiel.python.pybind11.pyspiel."""
+"""General tests for pyspiel python bindings."""
 
 import os
+
 from absl.testing import absltest
+from absl.testing import parameterized
 
 from open_spiel.python import games  # pylint: disable=unused-import
 from open_spiel.python import policy
 from open_spiel.python.mfg import games as mfgs  # pylint: disable=unused-import
 import pyspiel
 
+
+_FULLY_OPTIONAL_PYTHON_GAMES = frozenset([
+    "python_pokerkit_wrapper",
+    "python_pokerkit_wrapper_acpc_style",
+    "python_repeated_pokerkit"
+])
 # Specify game names in alphabetical order, to make the test easier to read.
-EXPECTED_GAMES = frozenset([
+# "Mandatory" = neither optional nor included only if certain flags are set.
+EXPECTED_MANDATORY_GAMES = frozenset([
     "2048",
     "add_noise",
     "amazons",
+    "antichess",
     "backgammon",
     "bargaining",
     "battleship",
@@ -34,6 +44,7 @@ EXPECTED_GAMES = frozenset([
     "breakthrough",
     "bridge",
     "bridge_uncontested_bidding",
+    "cached_tree",
     "catch",
     "chat_game",  # python game locating in python/games/chat_games/
     "checkers",
@@ -47,6 +58,7 @@ EXPECTED_GAMES = frozenset([
     "coop_to_1p",
     "coordinated_mp",
     "crazy_eights",
+    "cribbage",
     "cursor_go",
     "dark_chess",
     "dark_hex",
@@ -55,6 +67,7 @@ EXPECTED_GAMES = frozenset([
     "dots_and_boxes",
     "dou_dizhu",
     "efg_game",
+    "einstein_wurfelt_nicht",
     "euchre",
     "first_sealed_auction",
     "gin_rummy",
@@ -63,13 +76,16 @@ EXPECTED_GAMES = frozenset([
     "havannah",
     "hex",
     "hearts",
+    "hive",
     "kriegspiel",
     "kuhn_poker",
     "laser_tag",
+    "latent_ttt",
     "lewis_signaling",
     "leduc_poker",
     "liars_dice",
     "liars_dice_ir",
+    "lines_of_action",
     "maedn",
     "mancala",
     "markov_soccer",
@@ -90,6 +106,7 @@ EXPECTED_GAMES = frozenset([
     "mfg_dynamic_routing",
     "mfg_garnet",
     "misere",
+    "mnk",
     "morpion_solitaire",
     "negotiation",
     "nfg_game",
@@ -108,6 +125,7 @@ EXPECTED_GAMES = frozenset([
     "pig",
     "python_block_dominoes",
     "python_dynamic_routing",
+    "python_hangman",
     "python_iterated_prisoners_dilemma",
     "python_mfg_crowd_avoidance",
     "python_mfg_crowd_modelling",
@@ -120,6 +138,7 @@ EXPECTED_GAMES = frozenset([
     "python_liars_poker",
     "quoridor",
     "repeated_game",
+    "repeated_leduc_poker",
     "rbc",
     "restricted_nash_response",
     "sheriff",
@@ -138,26 +157,39 @@ EXPECTED_GAMES = frozenset([
     "twixt",
     "ultimate_tic_tac_toe",
     "y",
+    "yacht",
     "zerosum",
 ])
 
 
-class PyspielTest(absltest.TestCase):
+class PyspielTest(parameterized.TestCase):
 
-  def test_registered_names(self):
+  def test_registered_names_is_sorted(self):
+    game_names = pyspiel.registered_names()
+    self.assertSequenceEqual(game_names, sorted(game_names))
+
+  def test_registered_names_contains_expected_games(self):
     game_names = pyspiel.registered_names()
 
-    expected = list(EXPECTED_GAMES)
+    expected = list(EXPECTED_MANDATORY_GAMES)
     if (os.environ.get("OPEN_SPIEL_BUILD_WITH_HANABI", "OFF") == "ON" and
         "hanabi" not in expected):
       expected.append("hanabi")
     if (os.environ.get("OPEN_SPIEL_BUILD_WITH_ACPC", "OFF") == "ON" and
         "universal_poker" not in expected):
       expected.append("universal_poker")
-    expected = sorted(expected)
-    self.assertCountEqual(game_names, expected)
+      expected.append("repeated_poker")
+    # Verify we have registered all mandatory games + games added via flags
+    self.assertContainsSubset(expected, game_names)
 
-  def teste_default_loadable(self):
+    # Check that the contents of the remainder are all fully optional games.
+    # (If this fails, it likely means that someone added a game but forgot to
+    # update either EXPECTED_MANDATORY_GAMES or _FULLY_OPTIONAL_PYTHON_GAMES.)
+    remaining_games = set(game_names).difference(set(expected))
+    self.assertContainsSubset(expected_subset=remaining_games,
+                              actual_set=_FULLY_OPTIONAL_PYTHON_GAMES)
+
+  def test_default_loadable(self):
     # Games which cannmot be loaded with default parameters will be skipped by
     # several standard tests. We make a list of such games here in order to make
     # implementors think twice about making new games non-default-loadable
@@ -170,6 +202,8 @@ class PyspielTest(absltest.TestCase):
         # Being non-default-loadable prevents various automated tests.
         # Only add games here if there is no sensible default for a parameter.
         "add_noise",
+        "cached_tree",
+        "coop_to_1p",
         "efg_game",
         "nfg_game",
         "misere",
@@ -180,6 +214,9 @@ class PyspielTest(absltest.TestCase):
         "start_at",
         "zerosum",
     ]
+    if (os.environ.get("OPEN_SPIEL_BUILD_WITH_ACPC", "OFF") == "ON" and
+        "repeated_poker" not in expected):
+      expected.append("repeated_poker")
     self.assertCountEqual(non_default_loadable, expected)
 
   def test_registered_game_attributes(self):
@@ -231,6 +268,10 @@ class PyspielTest(absltest.TestCase):
     self.assertFalse(state.is_chance_node())
     self.assertFalse(state.is_terminal())
     self.assertEqual(state.legal_actions(), [0, 1, 2, 3, 4, 5, 6, 7, 8])
+
+  def test_game_string(self):
+    game = pyspiel.load_game("tic_tac_toe")
+    self.assertEqual(str(game), game.to_string())
 
   def test_game_parameters_from_string_empty(self):
     self.assertEqual(pyspiel.game_parameters_from_string(""), {})
@@ -333,6 +374,81 @@ class PyspielTest(absltest.TestCase):
                                           python_policy.state_lookup,
                                           batch_size, include_full_observations,
                                           seed, -1)
+
+  def test_get_game_parameters(self):
+    if "universal_poker" in pyspiel.registered_names():
+      game = pyspiel.load_game(pyspiel.hunl_game_string("fullgame"))
+      print(game)
+      params = game.get_parameters()
+      print(params)
+      param_string = pyspiel.game_parameters_to_string(params)
+      print(param_string)
+      params2 = pyspiel.game_parameters_from_string(param_string)
+      assert params2 is not None
+      game_from_params = pyspiel.load_game(
+          f"{game.get_type().short_name}{param_string}")
+      self.assertGreaterEqual(len(params2), len(params))
+      assert game_from_params is not None
+
+  @parameterized.parameters(
+      ("universal_poker", pyspiel.hunl_game_string("fullgame")),
+      (
+          "repeated_poker",
+          "repeated_poker(max_num_hands=10,reset_stacks=True,"
+          + "rotate_dealer=True,universal_poker_game_string=universal_poker("
+          + "betting=nolimit,bettingAbstraction=fullgame,blind=100 50,"
+          + "firstPlayer=2 1 1 1,numBoardCards=0 3 1 1,numHoleCards=2,"
+          + "numPlayers=2,numRanks=13,numRounds=4,numSuits=4,stack=20000 20000"
+          + "))"),
+      ("python_pokerkit_wrapper", "python_pokerkit_wrapper()"),
+      ("python_pokerkit_wrapper",
+       "python_pokerkit_wrapper(variant=FixedLimitSevenCardStud)"),
+      ("python_pokerkit_wrapper",
+       "python_pokerkit_wrapper(variant=PotLimitOmahaHoldem)"),
+      ("python_pokerkit_wrapper_acpc_style",
+       "python_pokerkit_wrapper_acpc_style(),"),
+      ("kuhn_poker", "kuhn_poker(players=3)"),
+      ("tic_tac_toe", "tic_tac_toe"),
+      ("breakthrough", "breakthrough(rows=6,columns=6)"))
+  def test_game_serialize_deserialize(self, game_name, game_string):
+    if game_name in pyspiel.registered_names():
+      game = pyspiel.load_game(game_string)
+      serialized_game = game.serialize()
+      game2 = pyspiel.deserialize_game(serialized_game)
+      self.assertEqual(str(game), str(game2))
+
+  def test_game_structs(self):
+    game = pyspiel.load_game("tic_tac_toe")
+    state = game.new_initial_state()
+
+    # Test ActionStruct
+    action = state.legal_actions()[0]
+    action_struct = state.action_to_struct(action)
+    self.assertIsNotNone(action_struct)
+    self.assertIsInstance(action_struct, pyspiel.GameStruct)
+    self.assertIsInstance(action_struct, pyspiel.ActionStruct)
+    json_str = action_struct.to_json()
+    self.assertIn('"row":', json_str)
+    self.assertIn('"col":', json_str)
+
+    # Test StructToAction
+    self.assertEqual(action, state.struct_to_action(action_struct))
+
+    # Test StateStruct
+    state_struct = state.to_struct()
+    self.assertIsNotNone(state_struct)
+    self.assertIsInstance(state_struct, pyspiel.GameStruct)
+    self.assertIsInstance(state_struct, pyspiel.StateStruct)
+    json_str = state_struct.to_json()
+    self.assertIn('"board":', json_str)
+
+    # Test ObservationStruct
+    observation_struct = state.to_observation_struct()
+    self.assertIsNotNone(observation_struct)
+    self.assertIsInstance(observation_struct, pyspiel.GameStruct)
+    self.assertIsInstance(observation_struct, pyspiel.ObservationStruct)
+    json_str = observation_struct.to_json()
+    self.assertIn('"board":', json_str)
 
 
 if __name__ == "__main__":

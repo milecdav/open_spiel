@@ -29,17 +29,22 @@ export DEFAULT_OPTIONAL_DEPENDENCY=${DEFAULT_OPTIONAL_DEPENDENCY:-"OFF"}
 # Building the Python API can be disabled by setting this to OFF.
 export OPEN_SPIEL_BUILD_WITH_PYTHON=${OPEN_SPIEL_BUILD_WITH_PYTHON:-"ON"}
 
+# Abseil version. Must support older versions for previous wheels on MacOS.
+export OPEN_SPIEL_ABSL_VERSION=${OPEN_SPIEL_ABSL_VERSION:-"20250814.1"}
+
 # Each optional dependency has their own flag, that defaults to the global
 # "$DEFAULT_OPTIONAL_DEPENDENCY" if undefined. To enable an optional dependency,
 # we recomment defining the associated environment variable in your bashrc or
 # your virtualenv bashrc, e.g. export OPEN_SPIEL_BUILD_WITH_HANABI="ON"
 export OPEN_SPIEL_BUILD_WITH_HANABI=${OPEN_SPIEL_BUILD_WITH_HANABI:-$DEFAULT_OPTIONAL_DEPENDENCY}
 export OPEN_SPIEL_BUILD_WITH_ACPC=${OPEN_SPIEL_BUILD_WITH_ACPC:-$DEFAULT_OPTIONAL_DEPENDENCY}
-export OPEN_SPIEL_BUILD_WITH_JULIA=${OPEN_SPIEL_BUILD_WITH_JULIA:-$DEFAULT_OPTIONAL_DEPENDENCY}
 export OPEN_SPIEL_BUILD_WITH_XINXIN=${OPEN_SPIEL_BUILD_WITH_XINXIN:-$DEFAULT_OPTIONAL_DEPENDENCY}
 export OPEN_SPIEL_BUILD_WITH_ROSHAMBO=${OPEN_SPIEL_BUILD_WITH_ROSHAMBO:-$DEFAULT_OPTIONAL_DEPENDENCY}
-export OPEN_SPIEL_BUILD_WITH_GO=${OPEN_SPIEL_BUILD_WITH_GO:-$DEFAULT_OPTIONAL_DEPENDENCY}
-export OPEN_SPIEL_BUILD_WITH_RUST=${OPEN_SPIEL_BUILD_WITH_RUST:-$DEFAULT_OPTIONAL_DEPENDENCY}
+
+# Deprecated language APIs that are no longer maintained; do not include them as a default optional dependency.
+export OPEN_SPIEL_BUILD_WITH_GO=${OPEN_SPIEL_BUILD_WITH_GO:-"OFF"}
+export OPEN_SPIEL_BUILD_WITH_RUST=${OPEN_SPIEL_BUILD_WITH_RUST:-"OFF"}
+export OPEN_SPIEL_BUILD_WITH_JULIA=${OPEN_SPIEL_BUILD_WITH_JULIA:-"OFF"}
 
 # Download the header-only library, libnop (https://github.com/google/libnop),
 # to support the serialization and deserialization of C++ data types.
@@ -101,5 +106,4 @@ export OPEN_SPIEL_BUILD_WITH_ORTOOLS_DOWNLOAD_URL="${OPEN_SPIEL_BUILD_WITH_ORTOO
 # To override automatic detection, set to either ON or OFF.
 export OPEN_SPIEL_ENABLE_JAX=${OPEN_SPIEL_ENABLE_JAX:-"AUTO"}
 export OPEN_SPIEL_ENABLE_PYTORCH=${OPEN_SPIEL_ENABLE_PYTORCH:-"AUTO"}
-export OPEN_SPIEL_ENABLE_TENSORFLOW=${OPEN_SPIEL_ENABLE_TENSORFLOW:-"AUTO"}
 export OPEN_SPIEL_ENABLE_PYTHON_MISC=${OPEN_SPIEL_ENABLE_PYTHON_MISC:-"OFF"}

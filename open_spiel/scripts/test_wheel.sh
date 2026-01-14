@@ -33,14 +33,6 @@ PROJDIR=$2
 uname -a
 OS=`uname -a | awk '{print $1}'`
 
-# If it's full mode on Linux, we have to install Python 3.9 and make it the default.
-if [[ "$MODE" = "full" && "$OS" = "Linux" && "$OS_PYTHON_VERSION" = "3.9" ]]; then
-  echo "Linux detected and Python 3.9 requested. Installing Python 3.9 and setting as default."
-  sudo apt-get install python3.9 python3.9-dev
-  sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1
-  sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
-fi
-
 # Setting of PYBIN is complicated because of all the different environments this is run from.
 if [[ "$3" != "" ]]; then
   PYBIN=$3
@@ -57,17 +49,28 @@ if [[ "$MODE" = "full" ]]; then
   source $PROJDIR/open_spiel/scripts/python_extra_deps.sh $PYBIN
   $PYBIN -m pip install --upgrade $OPEN_SPIEL_PYTHON_JAX_DEPS
   $PYBIN -m pip install --upgrade $OPEN_SPIEL_PYTHON_PYTORCH_DEPS
-  $PYBIN -m pip install --upgrade $OPEN_SPIEL_PYTHON_TENSORFLOW_DEPS
   $PYBIN -m pip install --upgrade $OPEN_SPIEL_PYTHON_MISC_DEPS
 fi
 
 if [[ "$MODE" = "full" ]]; then
-  if [[ "$OS" = "Linux" ]]; then
-    ${PYBIN} -m pip install wheelhouse/open_spiel-*-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  elif [[ "$OS" = "Darwin" && "$OS_PYTHON_VERSION" = "3.9" ]]; then
-    ${PYBIN} -m pip install wheelhouse/open_spiel-*-cp39-cp39-macosx_10_9_x86_64.whl
+  if [[ "$OS" = "Linux" && "$OS_PYTHON_VERSION" = "3.11" ]]; then
+    file=`ls wheelhouse/open_spiel-*-cp311-cp311-manylinux*.whl`
+    ${PYBIN} -m pip install $file
+  elif [[ "$OS" = "Linux" && "$OS_PYTHON_VERSION" = "3.12" ]]; then
+    file=`ls wheelhouse/open_spiel-*-cp312-cp312-manylinux*.whl`
+    ${PYBIN} -m pip install $file
+  elif [[ "$OS" = "Darwin" && "$OS_PYTHON_VERSION" = "3.12" ]]; then
+    file=`ls wheelhouse/open_spiel-*-cp312-cp312-*.whl`
+    ${PYBIN} -m pip install $file
+  elif [[ "$OS" = "Darwin" && "$OS_PYTHON_VERSION" = "3.13" ]]; then
+    # Python 3.13 is only used to build the Python 3.14 wheel.
+    # So in this case, there is no Python version on the machine matching
+    # a wheel that was built, so simply skip the full tests.
+    echo "Skipping full tests for Python 3.14 wheel."
+    exit 0
   else
-    ${PYBIN} -m pip install wheelhouse/open_spiel-*-cp311-cp311-macosx_11_0_arm64.whl
+    echo "Config not found for full tests: $OS / $OS_PYTHON_VERSION"
+    exit -1
   fi
 fi
 

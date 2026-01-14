@@ -17,8 +17,11 @@
 #include <torch/torch.h>
 
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "open_spiel/abseil-cpp/absl/strings/match.h"
 
 namespace open_spiel {
 namespace algorithms {
@@ -39,10 +42,12 @@ std::istream& operator>>(std::istream& stream, ModelConfig& config) {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ModelConfig& config) {
-  stream << config.observation_tensor_shape[0] << " "
-         << config.observation_tensor_shape[1] << " "
-         << config.observation_tensor_shape[2] << " "
-         << config.number_of_actions << " " << config.nn_depth << " "
+  int shape_dim = config.observation_tensor_shape.size();
+  int height = shape_dim > 1 ? config.observation_tensor_shape[1] : 1;
+  int width = shape_dim > 2 ? config.observation_tensor_shape[2] : 1;
+
+  stream << config.observation_tensor_shape[0] << " " << height << " " << width
+         << " " << config.number_of_actions << " " << config.nn_depth << " "
          << config.nn_width << " " << config.learning_rate << " "
          << config.weight_decay << " " << config.nn_model;
   return stream;
@@ -272,9 +277,10 @@ ModelImpl::ModelImpl(const ModelConfig& config, const std::string& device)
   }
   // Decide if resnet or MLP
   if (config.nn_model == "resnet") {
+    int obs_dims = config.observation_tensor_shape.size();
     int channels = config.observation_tensor_shape[0];
-    int height = config.observation_tensor_shape[1];
-    int width = config.observation_tensor_shape[2];
+    int height = obs_dims > 1 ? config.observation_tensor_shape[1] : 1;
+    int width = obs_dims > 2 ? config.observation_tensor_shape[2] : 1;
 
     ResInputBlockConfig input_config = {/*input_channels=*/channels,
                                         /*input_height=*/height,
@@ -356,7 +362,7 @@ std::vector<torch::Tensor> ModelImpl::losses(torch::Tensor inputs,
     std::string parameter_name = named_parameter.key();
 
     // Do not include bias' in the loss.
-    if (parameter_name.find("bias") != std::string::npos) {
+    if (absl::StrContains(parameter_name, "bias")) {
       continue;
     }
 
@@ -384,7 +390,7 @@ std::vector<torch::Tensor> ModelImpl::forward_(torch::Tensor x,
     }
   } else if (this->nn_model_ == "mlp") {
     for (int i = 0; i < num_torso_blocks_ + 1; i++) {
-        x = layers_[i]->as<MLPBlock>()->forward(x);
+      x = layers_[i]->as<MLPBlock>()->forward(x);
     }
     output = layers_[num_torso_blocks_ + 1]->as<MLPOutputBlockImpl>()
         ->forward(x, mask);

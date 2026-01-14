@@ -24,7 +24,6 @@
 #include "open_spiel/spiel.h"
 #include "pybind11/include/pybind11/cast.h"
 #include "pybind11/include/pybind11/pybind11.h"
-#include "pybind11/include/pybind11/smart_holder.h"
 
 namespace py = ::pybind11;
 using open_spiel::Game;
@@ -37,10 +36,6 @@ using open_spiel::chess::Square;
 using open_spiel::chess::Piece;
 using open_spiel::chess::PieceType;
 using open_spiel::chess::Move;
-
-PYBIND11_SMART_HOLDER_TYPE_CASTERS(ChessGame);
-PYBIND11_SMART_HOLDER_TYPE_CASTERS(ChessState);
-PYBIND11_SMART_HOLDER_TYPE_CASTERS(ChessBoard);
 
 void open_spiel::init_pyspiel_games_chess(py::module& m) {
   py::module_ chess = m.def_submodule("chess");
@@ -98,6 +93,7 @@ void open_spiel::init_pyspiel_games_chess(py::module& m) {
       // num_repetitions(state: ChessState) -> int
       .def("num_repetitions", &ChessState::NumRepetitions)
       .def("parse_move_to_action", &ChessState::ParseMoveToAction)
+      .def("start_fen", &ChessState::StartFEN)
       // Pickle support
       .def(py::pickle(
           [](const ChessState& state) {  // __getstate__
